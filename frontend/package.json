@@ -1,0 +1,17 @@
+{
+  "name": "flashdash-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter desktop dev & pnpm --filter web dev",
+    "build": "pnpm --filter ui build && pnpm --filter desktop build && pnpm --filter web build",
+    "build:desktop": "pnpm --filter ui build && pnpm --filter desktop build",
+    "build:web": "pnpm --filter ui build && pnpm --filter web build",
+    "lint": "pnpm --recursive lint",
+    "type-check": "pnpm --recursive type-check"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
+
