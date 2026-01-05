@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import Optional
 import json
 from ..utils.flash import start_flash_job, get_flash_job, cancel_flash_job, flash_jobs
+from ..utils.tools import identify_device
+from ..utils.bundles import get_bundle_for_codename
 from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
@@ -11,22 +13,50 @@ router = APIRouter()
 
 class FlashStartRequest(BaseModel):
     device_serial: str
-    bundle_path: str
+    bundle_path: Optional[str] = None
     dry_run: bool = False
     confirmation_token: Optional[str] = None
 
 
 @router.post("/start")
 async def start_flash(request: FlashStartRequest):
-    """Start a flash job"""
+    """Start a flash job - auto-detects bundle if bundle_path not provided"""
     try:
+        # If bundle_path is not provided, try to find it automatically
+        bundle_path = request.bundle_path
+        
+        if not bundle_path:
+            # Identify device codename from serial
+            device_info = identify_device(request.device_serial)
+            if not device_info:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not identify device codename for serial: {request.device_serial}. "
+                           f"Please ensure the device is connected and in ADB or Fastboot mode."
+                )
+            
+            codename = device_info["codename"]
+            
+            # Find the latest bundle for this codename
+            bundle = get_bundle_for_codename(codename)
+            if not bundle:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No bundle found for device codename: {codename}. "
+                           f"Please download a bundle first or specify bundle_path."
+                )
+            
+            bundle_path = bundle["path"]
+        
         job_id = start_flash_job(
             device_serial=request.device_serial,
-            bundle_path=request.bundle_path,
+            bundle_path=bundle_path,
             dry_run=request.dry_run,
             confirmation_token=request.confirmation_token,
         )
-        return {"job_id": job_id, "status": "started"}
+        return {"job_id": job_id, "status": "started", "bundle_path": bundle_path}
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -14,7 +14,7 @@ backend/py-service/.venv/
 venv/
 ENV/
 env/
-
+bundles/
 # Build outputs
 dist/
 build/

@@ -4,9 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@flas
 import { Button } from '@flashdash/ui';
 import { Badge } from '@flashdash/ui';
 import { Alert, AlertDescription, AlertTitle } from '@flashdash/ui';
-import { Activity, Smartphone, Download, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Activity, Smartphone, Download, AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { DownloadDialog } from '../components/DownloadDialog';
+import { FlashDialog } from '../components/FlashDialog';
 
 interface Device {
   id: string;
@@ -103,6 +104,28 @@ export function Dashboard() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      <Card className="backdrop-blur-sm bg-card/80 border-border/50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="w-5 h-5" />
+            Flash GrapheneOS
+          </CardTitle>
+          <CardDescription>
+            Enter purchase number to automatically flash using local build
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FlashDialog
+            trigger={
+              <Button className="w-full">
+                <Zap className="w-4 h-4 mr-2" />
+                Flash Device by Purchase Number
+              </Button>
+            }
+          />
+        </CardContent>
+      </Card>
 
       <Card className="backdrop-blur-sm bg-card/80 border-border/50">
         <CardHeader>

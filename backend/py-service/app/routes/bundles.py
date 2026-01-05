@@ -7,6 +7,7 @@ from ..utils.bundles import (
     verify_bundle,
     get_available_releases,
     download_release,
+    find_latest_version,
 )
 
 router = APIRouter()
@@ -50,6 +51,18 @@ async def get_releases_endpoint(codename: str):
     """Get available GrapheneOS releases for a codename"""
     releases = await get_available_releases(codename)
     return {"codename": codename, "releases": releases}
+
+
+@router.get("/find-latest/{codename}")
+async def find_latest_version_endpoint(codename: str):
+    """Find the latest available version for a codename"""
+    latest_version = await find_latest_version(codename)
+    if not latest_version:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not find any available releases for codename: {codename}"
+        )
+    return {"codename": codename, "version": latest_version}
 
 
 class DownloadRequest(BaseModel):

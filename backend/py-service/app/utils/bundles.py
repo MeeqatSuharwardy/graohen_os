@@ -5,6 +5,7 @@ import hashlib
 import zipfile
 from pathlib import Path
 from typing import List, Dict, Optional, Any
+from datetime import datetime, timedelta
 from ..config import settings
 
 
@@ -155,12 +156,55 @@ def verify_bundle(bundle_path: str) -> Dict[str, Any]:
     }
 
 
+async def find_latest_version(codename: str, max_days_back: int = 30) -> Optional[str]:
+    """Find the latest available GrapheneOS version for a codename by checking recent dates"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Try the last N days, checking multiple build numbers per day (00-99)
+        base_date = datetime.now()
+        
+        for day_offset in range(max_days_back):
+            check_date = base_date - timedelta(days=day_offset)
+            date_str = check_date.strftime("%Y%m%d")
+            
+            # Try build numbers from 99 down to 00 (newer builds typically have higher numbers)
+            for build_num in range(99, -1, -1):
+                version = f"{date_str}{build_num:02d}"
+                download_url = f"https://releases.grapheneos.org/{codename}-factory-{version}.zip"
+                
+                try:
+                    response = await client.head(download_url, follow_redirects=True)
+                    if response.status_code == 200:
+                        return version
+                except Exception:
+                    continue
+        
+        return None
+
+
 async def get_available_releases(codename: str) -> List[Dict[str, Any]]:
     """Get available GrapheneOS releases for a codename"""
-    # GrapheneOS uses a simple pattern: https://releases.grapheneos.org/{codename}-factory-{version}.zip
-    # We can't easily scrape all versions, so we'll return a message that users need to specify version
-    # Alternatively, we could try common version patterns or fetch from their website
-    # For now, return empty list - UI should allow manual version entry
+    # GrapheneOS doesn't provide a public releases.json API
+    # The factory image URL pattern is: https://releases.grapheneos.org/{codename}-factory-{version}.zip
+    # Version format is typically: YYYYMMDDXX (e.g., 2024122200)
+    # Since we can't fetch a list, we return an empty list and the UI allows manual entry
+    # In the future, we could scrape their website or maintain a known versions list
+    try:
+        # Try to check if there's a releases endpoint (though it likely doesn't exist)
+        releases_url = f"https://releases.grapheneos.org/{codename}/releases.json"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(releases_url)
+            if response.status_code == 200:
+                data = response.json()
+                # If they have a releases.json, parse it
+                if isinstance(data, list):
+                    return data
+                elif isinstance(data, dict) and "releases" in data:
+                    return data["releases"]
+    except Exception:
+        # If releases.json doesn't exist (expected), return empty list
+        # UI will allow manual version entry
+        pass
+    
     return []
 
 
@@ -179,6 +223,13 @@ async def download_release(
     version_dir.mkdir(parents=True, exist_ok=True)
     
     # Download URL pattern for GrapheneOS factory images
+    # Format: https://releases.grapheneos.org/{codename}-factory-{version}.zip
+    # Version format is typically: YYYYMMDDXX (e.g., 2024122200)
+    
+    # Validate codename and version format
+    if not codename or not version:
+        raise ValueError("Codename and version are required")
+    
     download_url = f"https://releases.grapheneos.org/{codename}-factory-{version}.zip"
     sha256_url = f"{download_url}.sha256"
     sig_url = f"{download_url}.sig"
@@ -194,10 +245,20 @@ async def download_release(
     try:
         # Download factory image ZIP
         async with httpx.AsyncClient(timeout=3600.0) as client:
+            # First, check if the file exists
+            head_response = await client.head(download_url)
+            if head_response.status_code == 404:
+                raise Exception(
+                    f"Release not found: {codename}-factory-{version}.zip (HTTP 404). "
+                    f"Please verify the codename and version are correct. "
+                    f"Version format is typically YYYYMMDDXX (e.g., 2024122200)."
+                )
+            
             async with client.stream("GET", download_url) as response:
                 if response.status_code != 200:
                     raise Exception(
-                        f"Failed to download: HTTP {response.status_code}"
+                        f"Failed to download: HTTP {response.status_code}. "
+                        f"URL: {download_url}"
                     )
                 
                 total_size = int(response.headers.get("content-length", 0))
