@@ -41,12 +41,16 @@ def run_fastboot_command(args: List[str], serial: Optional[str] = None, timeout:
         cmd.extend(["-s", serial])
     cmd.extend(args)
     
-    return subprocess.run(
+    result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         timeout=timeout,
     )
+    
+    # Fastboot sometimes returns non-zero exit codes even on success
+    # Check if we got valid output instead of relying solely on returncode
+    return result
 
 
 def get_devices() -> List[Dict[str, str]]:
@@ -87,18 +91,26 @@ def identify_device(serial: str) -> Optional[Dict[str, str]]:
     """Identify device codename - works in both ADB and Fastboot mode"""
     # Try Fastboot first (if device is in fastboot mode)
     result = run_fastboot_command(["getvar", "product"], serial=serial)
-    if result.returncode == 0:
-        for line in result.stdout.split("\n"):
-            if line.startswith("product:"):
-                codename = line.split(":")[1].strip()
-                # Remove any extra text after the codename
-                codename = codename.split()[0] if codename else ""
-                if codename in settings.supported_codenames_list:
-                    device_name = get_device_name(codename)
-                    return {
-                        "codename": codename,
-                        "deviceName": device_name,
-                    }
+    # Fastboot outputs to stderr, not stdout!
+    output = result.stderr if result.stderr else result.stdout
+    if output:
+        for line in output.split("\n"):
+            line_lower = line.lower().strip()
+            if "product:" in line_lower:
+                # Handle format: "product: panther" or "product:panther"
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    codename = parts[1].strip()
+                    # Remove any extra text after the codename (like "Finished", "Total time", etc.)
+                    codename = codename.split()[0] if codename else ""
+                    # Also remove any trailing dots or special chars
+                    codename = codename.rstrip('.,;')
+                    if codename and codename in settings.supported_codenames_list:
+                        device_name = get_device_name(codename)
+                        return {
+                            "codename": codename,
+                            "deviceName": device_name,
+                        }
     
     # Try ADB (if device is in ADB mode)
     result = run_adb_command(["shell", "getprop", "ro.product.device"], serial=serial)

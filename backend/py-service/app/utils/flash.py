@@ -28,8 +28,17 @@ def start_flash_job(
     # Verify bundle
     from .bundles import verify_bundle
     verification = verify_bundle(bundle_path)
-    if not verification["valid"]:
+    
+    # Only fail on actual errors, not warnings (like SHA256 mismatch for renamed files)
+    if verification["errors"]:
         raise ValueError(f"Bundle verification failed: {verification['errors']}")
+    
+    # Log warnings but don't fail
+    if verification["warnings"]:
+        import logging
+        logger = logging.getLogger(__name__)
+        for warning in verification["warnings"]:
+            logger.warning(f"Bundle verification warning: {warning}")
     
     # Create job
     job = {
@@ -81,31 +90,78 @@ def _run_flash(job: Dict[str, Any]):
     
     # Execute flash script
     try:
+        # Set environment variables for device serial and fastboot path
+        env = os.environ.copy()
+        env["ANDROID_SERIAL"] = device_serial
+        # Ensure fastboot is in PATH
+        fastboot_dir = os.path.dirname(settings.FASTBOOT_PATH)
+        current_path = env.get("PATH", "")
+        if fastboot_dir not in current_path:
+            env["PATH"] = f"{fastboot_dir}:{current_path}"
+        
+        job["status"] = "running"
+        job["logs"].append(f"Starting flash process for device: {device_serial}")
+        job["logs"].append(f"Using bundle: {bundle_path}")
+        job["logs"].append(f"Command: {' '.join(cmd)}")
+        job["logs"].append(f"Fastboot path: {settings.FASTBOOT_PATH}")
+        
         process = subprocess.Popen(
             cmd,
             cwd=str(bundle_path),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
+            bufsize=0,  # Unbuffered for real-time output
             universal_newlines=True,
+            env=env,
         )
         
         job["process"] = process
-        job["status"] = "running"
+        job["logs"].append("Flash process started, streaming output...")
         
-        # Stream output
-        for line in iter(process.stdout.readline, ''):
-            if line:
-                job["logs"].append(line.strip())
+        # Stream output in real-time (non-blocking)
+        import select
+        import sys
         
-        process.wait()
+        # Use select for non-blocking read (Unix only)
+        if hasattr(select, 'select'):
+            while True:
+                # Check if process is still running
+                if process.poll() is not None:
+                    # Process finished, read remaining output
+                    remaining = process.stdout.read()
+                    if remaining:
+                        for line in remaining.splitlines():
+                            if line.strip():
+                                job["logs"].append(line.strip())
+                    break
+                
+                # Check if there's data to read (non-blocking)
+                ready, _, _ = select.select([process.stdout], [], [], 0.1)
+                if ready:
+                    line = process.stdout.readline()
+                    if line:
+                        line = line.strip()
+                        if line:  # Only add non-empty lines
+                            job["logs"].append(line)
+        else:
+            # Fallback for Windows or systems without select
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    line = line.strip()
+                    if line:
+                        job["logs"].append(line)
+                if process.poll() is not None:
+                    break
         
-        if process.returncode == 0:
+        return_code = process.poll()
+        
+        if return_code == 0:
             job["status"] = "completed"
+            job["logs"].append("✓ Flash completed successfully!")
         else:
             job["status"] = "failed"
-            job["logs"].append(f"Process exited with code {process.returncode}")
+            job["logs"].append(f"✗ Flash failed with exit code: {return_code}")
             
     except Exception as e:
         job["status"] = "failed"

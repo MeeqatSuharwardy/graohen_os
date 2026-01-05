@@ -28,35 +28,96 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
   const [deviceInfo, setDeviceInfo] = useState<{ codename?: string; deviceName?: string } | null>(null);
 
   useEffect(() => {
-    if (jobId) {
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://127.0.0.1:17890';
-      const eventSource = new EventSource(`${API_BASE_URL}/flash/jobs/${jobId}/stream`);
-      
-      eventSource.onmessage = (event) => {
+    if (!jobId) return;
+    
+    const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://127.0.0.1:17890';
+    const eventSource = new EventSource(`${API_BASE_URL}/flash/jobs/${jobId}/stream`);
+    
+    const checkStatus = async () => {
+      try {
+        const response = await apiClient.get(`/flash/jobs/${jobId}`);
+        const job = response.data;
+        
+        // Update status
+        if (job.status !== status) {
+          setStatus(job.status);
+          if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+            setFlashing(false);
+            clearInterval(statusInterval);
+            eventSource.close();
+          }
+        }
+      } catch (err: any) {
+        // If job not found (404), it might have been cleared or never created
+        if (err.response?.status === 404) {
+          console.warn('Flash job not found, may have completed or been cleared');
+          // Don't clear interval immediately, might be a timing issue
+        }
+        // Ignore other errors, will retry
+      }
+    };
+    
+    // Poll for status updates (non-blocking)
+    const statusInterval = setInterval(checkStatus, 1000);
+    
+    eventSource.onmessage = (event) => {
+      try {
         const data = JSON.parse(event.data);
         if (data.line) {
-          setLogs(prev => [...prev, data.line]);
+          // Use functional update to avoid stale closures
+          setLogs(prev => {
+            // Avoid duplicates
+            if (prev.length === 0 || prev[prev.length - 1] !== data.line) {
+              return [...prev, data.line];
+            }
+            return prev;
+          });
         }
-      };
-      
-      eventSource.addEventListener('status', (event) => {
+      } catch (err) {
+        console.error('Error parsing SSE message:', err);
+      }
+    };
+    
+    eventSource.addEventListener('status', (event) => {
+      try {
         const data = JSON.parse(event.data);
         setStatus(data.status);
         if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
           setFlashing(false);
+          clearInterval(statusInterval);
           eventSource.close();
         }
-      });
-      
-      eventSource.onerror = () => {
-        eventSource.close();
-      };
-      
-      return () => {
-        eventSource.close();
-      };
-    }
-  }, [jobId]);
+      } catch (err) {
+        console.error('Error parsing status event:', err);
+      }
+    });
+    
+    eventSource.addEventListener('log', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.line) {
+          setLogs(prev => {
+            if (prev.length === 0 || prev[prev.length - 1] !== data.line) {
+              return [...prev, data.line];
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.error('Error parsing log event:', err);
+      }
+    });
+    
+    eventSource.onerror = (err) => {
+      console.error('EventSource error:', err);
+      // Don't close on first error, might be temporary
+    };
+    
+    return () => {
+      clearInterval(statusInterval);
+      eventSource.close();
+    };
+  }, [jobId, status]);
 
   const handleFlash = async () => {
     if (!purchaseNumber.trim()) {
@@ -159,14 +220,24 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
       setStatus('starting');
       setLogs(prev => [...prev, 'Starting flash process...']);
       
-      const response = await apiClient.post('/flash/start', {
-        device_serial: deviceSerial,
-        dry_run: false,
-        confirmation_token: `FLASH ${deviceSerial}`,
-      });
+      try {
+        const response = await apiClient.post('/flash/start', {
+          device_serial: deviceSerial,
+          dry_run: false,
+          confirmation_token: `FLASH ${deviceSerial}`,
+        });
 
-      setJobId(response.data.job_id);
-      setStatus('running');
+        setJobId(response.data.job_id);
+        setStatus('running');
+        setLogs(prev => [...prev, `Flash job started: ${response.data.job_id}`]);
+      } catch (flashErr: any) {
+        const errorDetail = flashErr.response?.data?.detail || flashErr.message || 'Unknown error';
+        setError(`Failed to start flash: ${errorDetail}`);
+        setFlashing(false);
+        setStatus('failed');
+        setLogs(prev => [...prev, `Error: ${errorDetail}`]);
+        return;
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to start flash');
       setFlashing(false);

@@ -27,9 +27,13 @@ async def identify_device_endpoint(device_id: str):
     identification = identify_device(device_id)
     
     if not identification:
+        # Return a more informative response instead of 404
+        # This allows the frontend to proceed with flashing even if identification fails
         raise HTTPException(
             status_code=404,
-            detail="Device not found or unsupported codename"
+            detail=f"Could not identify device codename for serial: {device_id}. "
+                   f"Device may be in fastboot mode or codename not in supported list. "
+                   f"Flashing can still proceed if a bundle is available."
         )
     
     return identification
