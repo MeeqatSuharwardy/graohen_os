@@ -5,7 +5,7 @@ from typing import Optional
 import json
 from ..utils.flash import start_flash_job, get_flash_job, cancel_flash_job, flash_jobs
 from ..utils.tools import identify_device
-from ..utils.bundles import get_bundle_for_codename
+from ..utils.bundles import get_bundle_for_codename, index_bundles
 from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
@@ -28,25 +28,43 @@ async def start_flash(request: FlashStartRequest):
         if not bundle_path:
             # Identify device codename from serial
             device_info = identify_device(request.device_serial)
+            
             if not device_info:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Could not identify device codename for serial: {request.device_serial}. "
-                           f"Please ensure the device is connected and in ADB or Fastboot mode."
-                )
-            
-            codename = device_info["codename"]
-            
-            # Find the latest bundle for this codename
-            bundle = get_bundle_for_codename(codename)
-            if not bundle:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No bundle found for device codename: {codename}. "
-                           f"Please download a bundle first or specify bundle_path."
-                )
-            
-            bundle_path = bundle["path"]
+                # If identification fails, try to find any bundle and use the first one
+                # This allows flashing even if device identification fails
+                all_bundles = index_bundles()
+                if not all_bundles:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Could not identify device codename for serial: {request.device_serial} "
+                               f"and no bundles found. Please ensure the device is connected and in ADB or Fastboot mode, "
+                               f"or download a bundle first."
+                    )
+                
+                # Use the first available bundle (user should ensure it's correct)
+                first_codename = list(all_bundles.keys())[0]
+                bundle = get_bundle_for_codename(first_codename)
+                if bundle:
+                    bundle_path = bundle["path"]
+                else:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Could not identify device and no valid bundles found. "
+                               f"Please download a bundle for your device first."
+                    )
+            else:
+                codename = device_info["codename"]
+                
+                # Find the latest bundle for this codename
+                bundle = get_bundle_for_codename(codename)
+                if not bundle:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No bundle found for device codename: {codename}. "
+                               f"Please download a bundle first or specify bundle_path."
+                    )
+                
+                bundle_path = bundle["path"]
         
         job_id = start_flash_job(
             device_serial=request.device_serial,

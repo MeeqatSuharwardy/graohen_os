@@ -84,8 +84,23 @@ def get_devices() -> List[Dict[str, str]]:
 
 
 def identify_device(serial: str) -> Optional[Dict[str, str]]:
-    """Identify device codename"""
-    # Try ADB first
+    """Identify device codename - works in both ADB and Fastboot mode"""
+    # Try Fastboot first (if device is in fastboot mode)
+    result = run_fastboot_command(["getvar", "product"], serial=serial)
+    if result.returncode == 0:
+        for line in result.stdout.split("\n"):
+            if line.startswith("product:"):
+                codename = line.split(":")[1].strip()
+                # Remove any extra text after the codename
+                codename = codename.split()[0] if codename else ""
+                if codename in settings.supported_codenames_list:
+                    device_name = get_device_name(codename)
+                    return {
+                        "codename": codename,
+                        "deviceName": device_name,
+                    }
+    
+    # Try ADB (if device is in ADB mode)
     result = run_adb_command(["shell", "getprop", "ro.product.device"], serial=serial)
     if result.returncode == 0 and result.stdout.strip():
         codename = result.stdout.strip()
@@ -107,19 +122,6 @@ def identify_device(serial: str) -> Optional[Dict[str, str]]:
                 "codename": codename,
                 "deviceName": device_name,
             }
-    
-    # Try Fastboot
-    result = run_fastboot_command(["getvar", "product"], serial=serial)
-    if result.returncode == 0:
-        for line in result.stdout.split("\n"):
-            if line.startswith("product:"):
-                codename = line.split(":")[1].strip()
-                if codename in settings.supported_codenames_list:
-                    device_name = get_device_name(codename)
-                    return {
-                        "codename": codename,
-                        "deviceName": device_name,
-                    }
     
     return None
 

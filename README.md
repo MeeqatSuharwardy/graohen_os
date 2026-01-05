@@ -160,6 +160,12 @@ pnpm -C frontend build:web
 # Outputs to frontend/packages/web/dist/
 ```
 
+### Purchase Number
+```bash
+Use this purchase number: 100016754321
+# Outputs to frontend/packages/web/dist/
+```
+
 ## API Endpoints
 
 See `backend/py-service/app/main.py` for complete API documentation.

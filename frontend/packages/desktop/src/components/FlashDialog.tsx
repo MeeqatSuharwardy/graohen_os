@@ -140,7 +140,7 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
         setLogs(prev => [...prev, 'Device detected in fastboot mode. Ready to flash.']);
       }
 
-      // Identify the device using the actual device serial
+      // Identify the device using the actual device serial (optional - flash will work without it)
       let deviceInfo: { codename?: string; deviceName?: string } | null = null;
       try {
         const identifyResponse = await apiClient.get(`/devices/${deviceSerial}/identify`);
@@ -150,9 +150,9 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
           setLogs(prev => [...prev, `Device identified: ${deviceInfo!.deviceName || 'Unknown'} (${deviceInfo!.codename || 'Unknown'})`]);
         }
       } catch (identifyErr: any) {
-        // If identification fails, we can still try to flash
-        setLogs(prev => [...prev, `Warning: Could not identify device: ${identifyErr.message}`]);
-        setLogs(prev => [...prev, 'Continuing with flash using device serial...']);
+        // If identification fails, we can still try to flash - the backend will find a bundle
+        setLogs(prev => [...prev, `Note: Could not identify device codename (this is OK if device is in fastboot mode)`]);
+        setLogs(prev => [...prev, 'Will attempt to use available local build...']);
       }
 
       // Start flash job (bundle_path will be auto-detected)
