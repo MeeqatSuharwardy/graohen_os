@@ -20,7 +20,8 @@ fastboot getvar version-bootloader
 # Get baseband/radio version
 fastboot getvar version-baseband
 ```
-
+uvicorn app.main:app --reload --host 127.0.0.1 --port 17890
+ pnpm dev
 ## Bootloader Operations
 
 ```bash

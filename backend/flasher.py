@@ -258,15 +258,44 @@ class GrapheneFlasher:
         if result.returncode != 0:
             self._error("Failed to reboot device to bootloader", step="preflight")
         
-        # Wait for device to enter bootloader (up to 30 seconds)
+        # Wait for device to enter bootloader (up to 60 seconds)
         self._log("Waiting for device to enter bootloader mode...", "info", step="preflight")
-        for _ in range(30):
+        self._log("This may take up to 60 seconds while the device reboots...", "info", step="preflight")
+        for attempt in range(60):
             time.sleep(1)
             result = self._run_fastboot(["devices"], timeout=5)
-            devices = [line.split()[0] for line in result.stdout.strip().split('\n')[1:] if line.strip() and line.startswith(self.device_serial)]
-            if devices:
+            if result.returncode != 0:
+                continue
+            
+            # Parse fastboot devices output
+            output = (result.stdout or "").strip()
+            if not output:
+                output = (result.stderr or "").strip()
+            else:
+                stderr_out = (result.stderr or "").strip()
+                if stderr_out and stderr_out not in output:
+                    output = output + "\n" + stderr_out
+            
+            devices = []
+            for line in output.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                if '\t' in line:
+                    parts = line.split('\t')
+                    if parts[0] and parts[0].strip():
+                        devices.append(parts[0].strip())
+                else:
+                    parts = line.split()
+                    if parts and len(parts[0]) > 5:
+                        devices.append(parts[0])
+            
+            if self.device_serial in devices:
                 self._log("✓ Device entered bootloader mode", "success", step="preflight")
                 return True
+            
+            if attempt % 10 == 0 and attempt > 0:
+                self._log(f"Still waiting for device to enter bootloader... ({attempt}/60 seconds)", "info", step="preflight")
         
         self._error("Device did not enter bootloader mode within 30 seconds", step="preflight")
     
@@ -460,8 +489,31 @@ class GrapheneFlasher:
             try:
                 # Check if device is still connected in fastboot
                 result = self._run_fastboot(["devices"], timeout=5)
-                devices_output = result.stdout.strip()
-                devices = [line.split()[0] for line in devices_output.split('\n')[1:] if line.strip()]
+                if result.returncode != 0:
+                    continue
+                
+                # Parse fastboot devices output
+                output = (result.stdout or "").strip()
+                if not output:
+                    output = (result.stderr or "").strip()
+                else:
+                    stderr_out = (result.stderr or "").strip()
+                    if stderr_out and stderr_out not in output:
+                        output = output + "\n" + stderr_out
+                
+                devices = []
+                for line in output.split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if '\t' in line:
+                        parts = line.split('\t')
+                        if parts[0] and parts[0].strip():
+                            devices.append(parts[0].strip())
+                    else:
+                        parts = line.split()
+                        if parts and len(parts[0]) > 5:
+                            devices.append(parts[0])
                 
                 # Device might have rebooted, try to reconnect
                 if self.device_serial not in devices:
@@ -528,17 +580,48 @@ class GrapheneFlasher:
         if result.returncode != 0:
             self._error("Failed to reboot to bootloader", step="reboot_fastboot")
         
-        # Wait for device to re-enter bootloader
+        # Wait for device to re-enter bootloader (up to 60 seconds)
         self._log("Waiting for device to re-enter bootloader mode...", "info", step="reboot_fastboot")
-        for _ in range(30):
+        self._log("This may take up to 60 seconds while the device reboots...", "info", step="reboot_fastboot")
+        for attempt in range(60):
             time.sleep(1)
             result = self._run_fastboot(["devices"], timeout=5)
-            devices = [line.split()[0] for line in result.stdout.strip().split('\n')[1:] if line.strip()]
+            if result.returncode != 0:
+                continue
+            
+            # Parse fastboot devices output (fastboot doesn't have header)
+            output = (result.stdout or "").strip()
+            if not output:
+                output = (result.stderr or "").strip()
+            else:
+                stderr_out = (result.stderr or "").strip()
+                if stderr_out and stderr_out not in output:
+                    output = output + "\n" + stderr_out
+            
+            devices = []
+            for line in output.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                if '\t' in line:
+                    # Format: "SERIAL\tfastboot"
+                    parts = line.split('\t')
+                    if parts[0] and parts[0].strip():
+                        devices.append(parts[0].strip())
+                else:
+                    # Try splitting by space
+                    parts = line.split()
+                    if parts and len(parts[0]) > 5:
+                        devices.append(parts[0])
+            
             if self.device_serial in devices:
                 self._log("✓ Device back in bootloader mode", "success", step="reboot_fastboot")
                 return
+            
+            if attempt % 10 == 0 and attempt > 0:
+                self._log(f"Still waiting for device to return... ({attempt}/60 seconds)", "info", step="reboot_fastboot")
         
-        self._error("Device did not return to bootloader mode within 30 seconds", step="reboot_fastboot")
+        self._error("Device did not return to bootloader mode within 60 seconds", step="reboot_fastboot")
     
     def find_partition_files(self) -> Dict[str, Any]:
         """
@@ -658,15 +741,78 @@ class GrapheneFlasher:
             if result.returncode != 0:
                 self._error("Failed to reboot to bootloader", step="flash")
             
-            # Wait for device to return
-            for _ in range(30):
+            # Give device a few seconds to start rebooting
+            self._log("Waiting 5 seconds for device to start rebooting...", "info", step="flash")
+            time.sleep(5)
+            
+            # Wait for device to return (up to 90 seconds - bootloader flash takes longer)
+            self._log("Waiting for device to return to bootloader after bootloader flash...", "info", step="flash")
+            self._log("This may take up to 90 seconds while the device reboots with new bootloader...", "info", step="flash")
+            device_found = False
+            for attempt in range(90):
                 time.sleep(1)
                 result = self._run_fastboot(["devices"], timeout=5)
-                devices = [line.split()[0] for line in result.stdout.strip().split('\n')[1:] if line.strip()]
+                
+                # Parse fastboot devices output
+                output = (result.stdout or "").strip()
+                if not output:
+                    output = (result.stderr or "").strip()
+                else:
+                    stderr_out = (result.stderr or "").strip()
+                    if stderr_out and stderr_out not in output:
+                        output = output + "\n" + stderr_out
+                
+                # Debug logging every 5 seconds
+                if attempt % 5 == 0:
+                    if output:
+                        self._log(f"Fastboot devices output (attempt {attempt + 1}/90): {repr(output)}", "info", step="flash")
+                    else:
+                        self._log(f"No devices found yet (attempt {attempt + 1}/90, returncode={result.returncode})", "info", step="flash")
+                
+                if result.returncode != 0:
+                    continue
+                
+                devices = []
+                for line in output.split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Filter out status messages like "Waiting for device..."
+                    if line.lower().startswith('waiting'):
+                        continue
+                    if '\t' in line:
+                        parts = line.split('\t')
+                        if parts[0] and parts[0].strip():
+                            devices.append(parts[0].strip())
+                    else:
+                        parts = line.split()
+                        if parts and len(parts[0]) > 5:
+                            devices.append(parts[0])
+                
                 if self.device_serial in devices:
+                    self._log(f"✓ Device returned to bootloader (found after {attempt + 1} seconds)", "success", step="flash")
+                    device_found = True
                     break
-            else:
-                self._error("Device did not return to bootloader after bootloader flash", step="flash")
+                
+                if attempt % 10 == 0 and attempt > 0:
+                    self._log(f"Still waiting for device to return... ({attempt}/90 seconds)", "info", step="flash")
+                    if devices:
+                        self._log(f"Found other devices: {devices}, looking for: {self.device_serial}", "info", step="flash")
+            
+            if not device_found:
+                # Final attempt to see what's available
+                self._log("Device not found within timeout. Checking current fastboot devices...", "warning", step="flash")
+                final_check = self._run_fastboot(["devices"], timeout=10)
+                final_output = (final_check.stdout or "").strip()
+                if not final_output:
+                    final_output = (final_check.stderr or "").strip()
+                self._error(
+                    f"Device did not return to bootloader after bootloader flash within 90 seconds.\n"
+                    f"Final fastboot devices output: {repr(final_output)}\n"
+                    f"Expected device serial: {self.device_serial}\n"
+                    f"The device may still be rebooting. Please check the device screen.",
+                    step="flash"
+                )
         
         # Flash radio
         if "radio" in partition_files:
@@ -683,15 +829,78 @@ class GrapheneFlasher:
             if result.returncode != 0:
                 self._error("Failed to reboot to bootloader", step="flash")
             
-            # Wait for device to return
-            for _ in range(30):
+            # Give device a few seconds to start rebooting
+            self._log("Waiting 5 seconds for device to start rebooting...", "info", step="flash")
+            time.sleep(5)
+            
+            # Wait for device to return (up to 90 seconds - radio flash can take longer)
+            self._log("Waiting for device to return to bootloader after radio flash...", "info", step="flash")
+            self._log("This may take up to 90 seconds while the device reboots...", "info", step="flash")
+            device_found = False
+            for attempt in range(90):
                 time.sleep(1)
                 result = self._run_fastboot(["devices"], timeout=5)
-                devices = [line.split()[0] for line in result.stdout.strip().split('\n')[1:] if line.strip()]
+                
+                # Parse fastboot devices output
+                output = (result.stdout or "").strip()
+                if not output:
+                    output = (result.stderr or "").strip()
+                else:
+                    stderr_out = (result.stderr or "").strip()
+                    if stderr_out and stderr_out not in output:
+                        output = output + "\n" + stderr_out
+                
+                # Debug logging every 5 seconds
+                if attempt % 5 == 0:
+                    if output:
+                        self._log(f"Fastboot devices output (attempt {attempt + 1}/90): {repr(output)}", "info", step="flash")
+                    else:
+                        self._log(f"No devices found yet (attempt {attempt + 1}/90, returncode={result.returncode})", "info", step="flash")
+                
+                if result.returncode != 0:
+                    continue
+                
+                devices = []
+                for line in output.split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Filter out status messages
+                    if line.lower().startswith('waiting'):
+                        continue
+                    if '\t' in line:
+                        parts = line.split('\t')
+                        if parts[0] and parts[0].strip():
+                            devices.append(parts[0].strip())
+                    else:
+                        parts = line.split()
+                        if parts and len(parts[0]) > 5:
+                            devices.append(parts[0])
+                
                 if self.device_serial in devices:
+                    self._log(f"✓ Device returned to bootloader (found after {attempt + 1} seconds)", "success", step="flash")
+                    device_found = True
                     break
-            else:
-                self._error("Device did not return to bootloader after radio flash", step="flash")
+                
+                if attempt % 10 == 0 and attempt > 0:
+                    self._log(f"Still waiting for device to return... ({attempt}/90 seconds)", "info", step="flash")
+                    if devices:
+                        self._log(f"Found other devices: {devices}, looking for: {self.device_serial}", "info", step="flash")
+            
+            if not device_found:
+                # Final attempt to see what's available
+                self._log("Device not found within timeout. Checking current fastboot devices...", "warning", step="flash")
+                final_check = self._run_fastboot(["devices"], timeout=10)
+                final_output = (final_check.stdout or "").strip()
+                if not final_output:
+                    final_output = (final_check.stderr or "").strip()
+                self._error(
+                    f"Device did not return to bootloader after radio flash within 90 seconds.\n"
+                    f"Final fastboot devices output: {repr(final_output)}\n"
+                    f"Expected device serial: {self.device_serial}\n"
+                    f"The device may still be rebooting. Please check the device screen.",
+                    step="flash"
+                )
         
         # Flash core partitions
         core_partitions = [
@@ -943,7 +1152,42 @@ Example usage:
                 flasher._log("Bootloader already unlocked, skipping unlock step", "info", step="unlock")
         
         # STEP 4: Reboot back to fastboot
-        flasher.step4_reboot_to_fastboot()
+        # Only reboot if we started from ADB mode (not already in fastboot)
+        # If device was already in fastboot mode at start, we're already in the right state
+        if not device_in_fastboot:
+            flasher._log("Rebooting to fastboot mode...", "info", step="reboot_fastboot")
+            flasher.step4_reboot_to_fastboot()
+        else:
+            flasher._log("Device already in fastboot mode, skipping reboot step", "info", step="reboot_fastboot")
+            # Do a quick validation to ensure device is still connected
+            flasher._log("Validating device is still connected in fastboot...", "info", step="reboot_fastboot")
+            validation_result = flasher._run_fastboot(["devices"], timeout=10)
+            if validation_result.returncode != 0:
+                flasher._error("Device not responding in fastboot mode", step="reboot_fastboot")
+            
+            # Parse and verify device is still there
+            output = (validation_result.stdout or "").strip()
+            if not output:
+                output = (validation_result.stderr or "").strip()
+            
+            devices_found = []
+            for line in output.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                if '\t' in line:
+                    parts = line.split('\t')
+                    if parts[0] and parts[0].strip():
+                        devices_found.append(parts[0].strip())
+                else:
+                    parts = line.split()
+                    if parts and len(parts[0]) > 5:
+                        devices_found.append(parts[0])
+            
+            if flasher.device_serial and flasher.device_serial not in devices_found:
+                flasher._error(f"Device {flasher.device_serial} not found in fastboot mode", step="reboot_fastboot")
+            
+            flasher._log("✓ Device confirmed in fastboot mode", "success", step="reboot_fastboot")
         
         # Find partition files
         partition_files = flasher.find_partition_files()
