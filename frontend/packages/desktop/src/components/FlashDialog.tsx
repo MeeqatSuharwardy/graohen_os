@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -9,122 +9,31 @@ import {
 } from '@flashdash/ui';
 import { Button } from '@flashdash/ui';
 import { Alert, AlertDescription } from '@flashdash/ui';
-import { Input } from '@flashdash/ui';
-import { Loader2, Zap, AlertCircle, CheckCircle2, X } from 'lucide-react';
+import { Loader2, Zap, AlertCircle, CheckCircle2, Smartphone } from 'lucide-react';
 import { apiClient } from '../lib/api';
+
+interface Device {
+  id: string;
+  serial: string;
+  state: 'device' | 'fastboot' | 'unauthorized' | 'offline';
+  codename?: string;
+  deviceName?: string;
+}
 
 interface FlashDialogProps {
   trigger?: React.ReactNode;
+  device?: Device; // Optional: pre-select a specific device
 }
 
-export function FlashDialog({ trigger }: FlashDialogProps) {
+export function FlashDialog({ trigger, device: preselectedDevice }: FlashDialogProps) {
   const [open, setOpen] = useState(false);
-  const [purchaseNumber, setPurchaseNumber] = useState('');
   const [flashing, setFlashing] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [deviceInfo, setDeviceInfo] = useState<{ codename?: string; deviceName?: string } | null>(null);
-
-  useEffect(() => {
-    if (!jobId) return;
-    
-    const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://127.0.0.1:17890';
-    const eventSource = new EventSource(`${API_BASE_URL}/flash/jobs/${jobId}/stream`);
-    
-    const checkStatus = async () => {
-      try {
-        const response = await apiClient.get(`/flash/jobs/${jobId}`);
-        const job = response.data;
-        
-        // Update status
-        if (job.status !== status) {
-          setStatus(job.status);
-          if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
-            setFlashing(false);
-            clearInterval(statusInterval);
-            eventSource.close();
-          }
-        }
-      } catch (err: any) {
-        // If job not found (404), it might have been cleared or never created
-        if (err.response?.status === 404) {
-          console.warn('Flash job not found, may have completed or been cleared');
-          // Don't clear interval immediately, might be a timing issue
-        }
-        // Ignore other errors, will retry
-      }
-    };
-    
-    // Poll for status updates (non-blocking)
-    const statusInterval = setInterval(checkStatus, 1000);
-    
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.line) {
-          // Use functional update to avoid stale closures
-          setLogs(prev => {
-            // Avoid duplicates
-            if (prev.length === 0 || prev[prev.length - 1] !== data.line) {
-              return [...prev, data.line];
-            }
-            return prev;
-          });
-        }
-      } catch (err) {
-        console.error('Error parsing SSE message:', err);
-      }
-    };
-    
-    eventSource.addEventListener('status', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setStatus(data.status);
-        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-          setFlashing(false);
-          clearInterval(statusInterval);
-          eventSource.close();
-        }
-      } catch (err) {
-        console.error('Error parsing status event:', err);
-      }
-    });
-    
-    eventSource.addEventListener('log', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.line) {
-          setLogs(prev => {
-            if (prev.length === 0 || prev[prev.length - 1] !== data.line) {
-              return [...prev, data.line];
-            }
-            return prev;
-          });
-        }
-      } catch (err) {
-        console.error('Error parsing log event:', err);
-      }
-    });
-    
-    eventSource.onerror = (err) => {
-      console.error('EventSource error:', err);
-      // Don't close on first error, might be temporary
-    };
-    
-    return () => {
-      clearInterval(statusInterval);
-      eventSource.close();
-    };
-  }, [jobId, status]);
+  const [deviceInfo, setDeviceInfo] = useState<{ codename?: string; deviceName?: string; serial?: string } | null>(null);
 
   const handleFlash = async () => {
-    if (!purchaseNumber.trim()) {
-      setError('Please enter a purchase number');
-      return;
-    }
-
     setFlashing(true);
     setError(null);
     setLogs([]);
@@ -132,56 +41,87 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
     setDeviceInfo(null);
 
     try {
-      const serial = purchaseNumber.trim();
+      let device: Device | null = null;
       
-      // First, check device state - get all connected devices
-      const devicesResponse = await apiClient.get('/devices');
-      const devices = devicesResponse.data;
-      
-      // Try to find device by serial or id (exact match)
-      let device = devices.find((d: any) => d.serial === serial || d.id === serial);
-      
-      // If not found by exact match, try to find any device in fastboot mode
-      // This handles cases where purchase number might be different from serial
-      if (!device && devices.length > 0) {
-        // If there's only one device, use it
-        if (devices.length === 1) {
-          device = devices[0];
-          setLogs([`Using detected device: ${device.serial} (${device.state} mode)`]);
-        } else {
-          // Try to find a device in fastboot mode
-          device = devices.find((d: any) => d.state === 'fastboot');
-          if (device) {
-            setLogs([`Found device in fastboot mode: ${device.serial}. Using this device.`]);
-          } else {
-            // Try to find a device in ADB mode
-            device = devices.find((d: any) => d.state === 'device');
-            if (device) {
-              setLogs([`Found device in ADB mode: ${device.serial}. Will reboot to fastboot.`]);
-            }
-          }
+      if (preselectedDevice) {
+        // Use the preselected device
+        device = preselectedDevice;
+        setLogs([`Using device: ${device.serial} (${device.state} mode)`]);
+      } else {
+        // Auto-detect device
+        setLogs(['Detecting connected devices...']);
+        
+        // Get all connected devices
+        const devicesResponse = await apiClient.get('/devices');
+        const devices = devicesResponse.data;
+        
+        if (!devices || devices.length === 0) {
+          setError('No devices detected. Please ensure device is connected via USB and in ADB or Fastboot mode.');
+          setFlashing(false);
+          setLogs(prev => [...prev, '✗ No devices found']);
+          return;
         }
+
+        // Find device - prioritize fastboot mode, then ADB mode
+        device = devices.find((d: any) => d.state === 'fastboot');
+        if (!device) {
+          device = devices.find((d: any) => d.state === 'device');
+        }
+        if (!device && devices.length > 0) {
+          device = devices[0]; // Use first device as fallback
+        }
+
+        if (!device) {
+          setError('No suitable device found. Please ensure device is in ADB or Fastboot mode.');
+          setFlashing(false);
+          setLogs(prev => [...prev, '✗ No suitable device found']);
+          return;
+        }
+
+        setLogs(prev => [...prev, `Device detected: ${device!.serial} (${device!.state} mode)`]);
       }
-      
-      // Use the actual device serial for flashing
-      const deviceSerial = device ? (device.serial || device.id) : serial;
-      
+
+      // At this point, device should not be null (we return early if it is)
       if (!device) {
-        setError('Device not detected. Please ensure device is connected and in ADB or Fastboot mode.');
+        setError('No device found');
         setFlashing(false);
         return;
       }
-      
+
+      const deviceSerial = device.serial || device.id;
+
+      // Identify device to get codename
+      if (device.codename) {
+        setDeviceInfo({
+          codename: device.codename,
+          deviceName: device.deviceName || device.codename,
+          serial: deviceSerial
+        });
+        setLogs(prev => [...prev, `Device identified: ${device.deviceName || device.codename} (${device.codename})`]);
+      } else {
+        // Try to identify
+        try {
+          const identifyResponse = await apiClient.get(`/devices/${deviceSerial}/identify`);
+          setDeviceInfo({
+            ...identifyResponse.data,
+            serial: deviceSerial
+          });
+          setLogs(prev => [...prev, `Device identified: ${identifyResponse.data.deviceName} (${identifyResponse.data.codename})`]);
+        } catch (identifyErr: any) {
+          setLogs(prev => [...prev, 'Note: Could not identify device codename. Will try to use available local build.']);
+        }
+      }
+
       // If device is in ADB mode, reboot to bootloader first
       if (device.state === 'device') {
         setStatus('rebooting');
-        setLogs(prev => [...prev, 'Device detected in ADB mode. Rebooting to bootloader...']);
+        setLogs(prev => [...prev, 'Device in ADB mode. Rebooting to bootloader...']);
         
         try {
           await apiClient.post(`/devices/${deviceSerial}/reboot/bootloader`);
           setLogs(prev => [...prev, 'Reboot command sent. Waiting for device to enter fastboot mode...']);
           
-          // Wait a bit for device to reboot
+          // Wait for device to reboot
           await new Promise(resolve => setTimeout(resolve, 5000));
           
           // Check again
@@ -190,49 +130,57 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
           const device2 = devices2.find((d: any) => (d.serial === deviceSerial || d.id === deviceSerial));
           
           if (device2 && device2.state !== 'fastboot') {
-            setLogs(prev => [...prev, 'Waiting for device to enter fastboot mode. Please ensure device is in fastboot mode.']);
-            // Continue anyway - the flash script will handle it
+            setLogs(prev => [...prev, 'Warning: Device may not have entered fastboot mode. Continuing anyway...']);
+          } else if (device2) {
+            setLogs(prev => [...prev, 'Device successfully entered fastboot mode.']);
           }
         } catch (rebootErr: any) {
-          setLogs(prev => [...prev, `Warning: Could not reboot automatically: ${rebootErr.message}`]);
-          setLogs(prev => [...prev, 'Please manually reboot device to fastboot mode (hold Power + Volume Down)']);
+          setLogs(prev => [...prev, `Warning: Could not reboot automatically: ${rebootErr.message}. Please manually reboot to fastboot mode.`]);
+          // Continue anyway - user can manually reboot
         }
-      } else if (device.state === 'fastboot') {
-        setLogs(prev => [...prev, 'Device detected in fastboot mode. Ready to flash.']);
       }
 
-      // Identify the device using the actual device serial (optional - flash will work without it)
-      let deviceInfo: { codename?: string; deviceName?: string } | null = null;
-      try {
-        const identifyResponse = await apiClient.get(`/devices/${deviceSerial}/identify`);
-        deviceInfo = identifyResponse.data;
-        if (deviceInfo) {
-          setDeviceInfo(deviceInfo);
-          setLogs(prev => [...prev, `Device identified: ${deviceInfo!.deviceName || 'Unknown'} (${deviceInfo!.codename || 'Unknown'})`]);
-        }
-      } catch (identifyErr: any) {
-        // If identification fails, we can still try to flash - the backend will find a bundle
-        setLogs(prev => [...prev, `Note: Could not identify device codename (this is OK if device is in fastboot mode)`]);
-        setLogs(prev => [...prev, 'Will attempt to use available local build...']);
-      }
-
-      // Start flash job (bundle_path will be auto-detected)
-      setStatus('starting');
+      // Execute flash - backend will auto-detect bundle
+      setStatus('running');
       setLogs(prev => [...prev, 'Starting flash process...']);
       
       try {
-        const response = await apiClient.post('/flash/start', {
+        const response = await apiClient.post('/flash/execute', {
           device_serial: deviceSerial,
           dry_run: false,
           confirmation_token: `FLASH ${deviceSerial}`,
         });
 
-        setJobId(response.data.job_id);
-        setStatus('running');
-        setLogs(prev => [...prev, `Flash job started: ${response.data.job_id}`]);
+        const result = response.data;
+        
+        // Always show all logs from the result
+        if (result.logs && Array.isArray(result.logs)) {
+          setLogs(result.logs);
+        } else {
+          setLogs([result.message || 'Flash executed']);
+        }
+        
+        if (result.success) {
+          setStatus('completed');
+          setLogs(prev => [...prev, '✓ Flash completed successfully!']);
+        } else {
+          setStatus('failed');
+          const errorMsg = result.message || result.error || 'Flash failed';
+          setError(errorMsg);
+          if (result.logs && result.logs.length > 0) {
+            const hasError = result.logs.some((log: string) => log.includes(errorMsg));
+            if (!hasError) {
+              setLogs(prev => [...prev, `✗ Error: ${errorMsg}`]);
+            }
+          } else {
+            setLogs([`✗ Flash failed: ${errorMsg}`]);
+          }
+        }
+        
+        setFlashing(false);
       } catch (flashErr: any) {
         const errorDetail = flashErr.response?.data?.detail || flashErr.message || 'Unknown error';
-        setError(`Failed to start flash: ${errorDetail}`);
+        setError(`Failed to execute flash: ${errorDetail}`);
         setFlashing(false);
         setStatus('failed');
         setLogs(prev => [...prev, `Error: ${errorDetail}`]);
@@ -242,35 +190,22 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
       setError(err.response?.data?.detail || err.message || 'Failed to start flash');
       setFlashing(false);
       setStatus('failed');
-    }
-  };
-
-  const handleCancel = async () => {
-    if (jobId) {
-      try {
-        await apiClient.post(`/flash/jobs/${jobId}/cancel`);
-        setStatus('cancelled');
-        setFlashing(false);
-      } catch (err) {
-        console.error('Failed to cancel:', err);
-      }
+      setLogs(prev => [...prev, `Error: ${err.response?.data?.detail || err.message || 'Unknown error'}`]);
     }
   };
 
   const handleClose = () => {
     if (!flashing) {
       setOpen(false);
-      setPurchaseNumber('');
       setError(null);
       setLogs([]);
       setStatus(null);
-      setJobId(null);
       setDeviceInfo(null);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogTrigger asChild>
         {trigger || (
           <Button>
@@ -283,7 +218,9 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
         <DialogHeader>
           <DialogTitle>Flash GrapheneOS</DialogTitle>
           <DialogDescription>
-            Enter the purchase number (device serial) to automatically flash GrapheneOS
+            {preselectedDevice 
+              ? `Flash ${preselectedDevice.deviceName || preselectedDevice.codename || preselectedDevice.serial} using local build`
+              : 'Automatically detect device and flash using local build'}
           </DialogDescription>
         </DialogHeader>
 
@@ -299,46 +236,36 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
             <Alert>
               <CheckCircle2 className="h-4 w-4" />
               <AlertDescription>
-                Device identified: <strong>{deviceInfo.deviceName}</strong> ({deviceInfo.codename})
+                Device: <strong>{deviceInfo.deviceName}</strong> ({deviceInfo.codename})
+                {deviceInfo.serial && <span className="ml-2 text-xs text-muted-foreground">({deviceInfo.serial})</span>}
               </AlertDescription>
             </Alert>
           )}
 
           {!flashing ? (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Purchase Number (Device Serial)</label>
-                <Input
-                  type="text"
-                  value={purchaseNumber}
-                  onChange={(e) => setPurchaseNumber(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && purchaseNumber.trim()) {
-                      handleFlash();
-                    }
-                  }}
-                  placeholder="e.g., 100016754321"
-                  disabled={flashing}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Enter the device serial number (or purchase number). The app will automatically:
-                  <br />• Detect connected devices and use the appropriate one
-                  <br />• Reboot to fastboot mode if needed
-                  <br />• Find the latest local build for your device
-                  <br />• Start flashing GrapheneOS
+              <div className="text-center py-6">
+                <Smartphone className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground mb-4">
+                  Connect your device via USB and ensure it's in ADB or Fastboot mode.
                   <br />
-                  <br />
-                  <strong>Tip:</strong> If only one device is connected, you can enter any number - the app will use the detected device.
+                  The app will automatically:
                 </p>
+                <ul className="text-sm text-muted-foreground text-left max-w-md mx-auto space-y-2">
+                  <li>• Detect connected device</li>
+                  <li>• Reboot to fastboot mode if needed</li>
+                  <li>• Find local build from bundles folder</li>
+                  <li>• Flash GrapheneOS</li>
+                </ul>
               </div>
 
               <Button
                 onClick={handleFlash}
-                disabled={!purchaseNumber.trim()}
                 className="w-full"
+                size="lg"
               >
                 <Zap className="w-4 h-4 mr-2" />
-                Start Flashing
+                Flash Device
               </Button>
             </div>
           ) : (
@@ -348,24 +275,12 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span className="font-medium">
                     {status === 'rebooting' && 'Rebooting to bootloader...'}
-                    {status === 'starting' && 'Starting flash...'}
                     {status === 'running' && 'Flashing device...'}
                     {status === 'completed' && 'Flash completed!'}
                     {status === 'failed' && 'Flash failed'}
-                    {status === 'cancelled' && 'Flash cancelled'}
                     {!status && 'Preparing...'}
                   </span>
                 </div>
-                {status === 'running' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCancel}
-                  >
-                    <X className="w-4 h-4 mr-2" />
-                    Cancel
-                  </Button>
-                )}
               </div>
 
               {logs.length > 0 && (
@@ -398,15 +313,6 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
                   </AlertDescription>
                 </Alert>
               )}
-
-              {(status === 'completed' || status === 'failed' || status === 'cancelled') && (
-                <Button
-                  onClick={handleClose}
-                  className="w-full"
-                >
-                  Close
-                </Button>
-              )}
             </div>
           )}
         </div>
@@ -414,4 +320,3 @@ export function FlashDialog({ trigger }: FlashDialogProps) {
     </Dialog>
   );
 }
-

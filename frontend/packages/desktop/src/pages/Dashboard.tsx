@@ -4,10 +4,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@flas
 import { Button } from '@flashdash/ui';
 import { Badge } from '@flashdash/ui';
 import { Alert, AlertDescription, AlertTitle } from '@flashdash/ui';
-import { Activity, Smartphone, Download, AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
+import { Activity, Smartphone, Download, AlertTriangle, CheckCircle2, Zap, Unlock, Power } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { DownloadDialog } from '../components/DownloadDialog';
 import { FlashDialog } from '../components/FlashDialog';
+import { UnlockAndFlashButton } from '../components/UnlockAndFlashButton';
 
 interface Device {
   id: string;
@@ -31,20 +32,12 @@ export function Dashboard() {
   }, []);
 
   const checkServiceStatus = async () => {
-    if (window.electronAPI) {
-      const status = await window.electronAPI.getServiceStatus();
-      setServiceStatus(status);
-      if (!status.running) {
-        await window.electronAPI.startService();
-      }
-    } else {
-      // Check directly via API
-      try {
-        await apiClient.get('/health');
-        setServiceStatus({ running: true });
-      } catch {
-        setServiceStatus({ running: false });
-      }
+    // Check directly via API - backend should be running separately
+    try {
+      await apiClient.get('/health');
+      setServiceStatus({ running: true });
+    } catch {
+      setServiceStatus({ running: false });
     }
   };
 
@@ -66,6 +59,19 @@ export function Dashboard() {
       refreshDevices();
     } catch (err: any) {
       setError(err.message || 'Failed to identify device');
+    }
+  };
+
+  const handleRebootToBootloader = async (deviceId: string) => {
+    try {
+      await apiClient.post(`/devices/${deviceId}/reboot/bootloader`);
+      setError(null);
+      // Refresh devices after a delay to see the state change
+      setTimeout(() => {
+        refreshDevices();
+      }, 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Failed to reboot to bootloader');
     }
   };
 
@@ -120,7 +126,7 @@ export function Dashboard() {
             trigger={
               <Button className="w-full">
                 <Zap className="w-4 h-4 mr-2" />
-                Flash Device by Purchase Number
+                Flash Device
               </Button>
             }
           />
@@ -185,19 +191,49 @@ export function Dashboard() {
                       )}
                       {device.codename && (
                         <>
-                          <DownloadDialog
-                            codename={device.codename}
-                            deviceName={device.deviceName}
-                            trigger={
-                              <Button size="sm" variant="outline">
-                                <Download className="w-4 h-4 mr-2" />
-                                Download Build
-                              </Button>
-                            }
-                          />
-                          <Button size="sm" variant="outline">
-                            Flash
-                          </Button>
+                          {device.state === 'fastboot' ? (
+                            <UnlockAndFlashButton
+                              device={device}
+                              trigger={
+                                <Button size="sm" className="bg-primary">
+                                  <Unlock className="w-4 h-4 mr-2" />
+                                  Unlock & Flash
+                                </Button>
+                              }
+                            />
+                          ) : (
+                            <>
+                              {device.state === 'device' && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleRebootToBootloader(device.id)}
+                                >
+                                  <Power className="w-4 h-4 mr-2" />
+                                  Reboot to Fastboot
+                                </Button>
+                              )}
+                              <DownloadDialog
+                                codename={device.codename}
+                                deviceName={device.deviceName}
+                                trigger={
+                                  <Button size="sm" variant="outline">
+                                    <Download className="w-4 h-4 mr-2" />
+                                    Download Build
+                                  </Button>
+                                }
+                              />
+                              <FlashDialog
+                                device={device}
+                                trigger={
+                                  <Button size="sm">
+                                    <Zap className="w-4 h-4 mr-2" />
+                                    Flash
+                                  </Button>
+                                }
+                              />
+                            </>
+                          )}
                         </>
                       )}
                     </div>

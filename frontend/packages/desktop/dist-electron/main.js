@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -40,9 +7,28 @@ const electron_1 = require("electron");
 const child_process_1 = require("child_process");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
+const util_1 = require("util");
+const readFile = (0, util_1.promisify)(fs_1.default.readFile);
+const writeFile = (0, util_1.promisify)(fs_1.default.writeFile);
 let mainWindow = null;
-let pythonService = null;
 const isDev = process.env.NODE_ENV === 'development' || !electron_1.app.isPackaged;
+// Load environment variables
+let envConfig = {};
+try {
+    const envPath = path_1.default.join(electron_1.app.getPath('userData'), '.env');
+    if (fs_1.default.existsSync(envPath)) {
+        const envContent = fs_1.default.readFileSync(envPath, 'utf-8');
+        envContent.split('\n').forEach(line => {
+            const [key, ...valueParts] = line.split('=');
+            if (key && valueParts.length) {
+                envConfig[key.trim()] = valueParts.join('=').trim();
+            }
+        });
+    }
+}
+catch (e) {
+    console.error('Failed to load .env:', e);
+}
 function createWindow() {
     mainWindow = new electron_1.BrowserWindow({
         width: 1400,
@@ -68,103 +54,163 @@ function createWindow() {
         mainWindow = null;
     });
 }
-// Register custom protocol handler
-electron_1.app.setAsDefaultProtocolClient('flashdash');
-// Handle protocol URLs
-electron_1.app.on('open-url', (event, url) => {
-    event.preventDefault();
-    if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-    }
-    else {
-        createWindow();
-    }
-});
-// Windows/Linux protocol handling
-electron_1.app.on('second-instance', () => {
-    if (mainWindow) {
-        if (mainWindow.isMinimized())
-            mainWindow.restore();
-        mainWindow.focus();
-    }
-});
-function startPythonService() {
-    return new Promise((resolve) => {
-        const backendPath = path_1.default.join(__dirname, '../../../../backend/py-service');
-        const pythonPath = isDev
-            ? path_1.default.join(__dirname, '../../../../backend/.venv/bin/python')
-            : 'python3';
-        if (!fs_1.default.existsSync(backendPath)) {
-            console.error('Backend path not found:', backendPath);
-            resolve(false);
-            return;
-        }
-        pythonService = (0, child_process_1.spawn)(pythonPath, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '17890'], {
-            cwd: backendPath,
-            stdio: 'pipe',
-            env: { ...process.env, PYTHONUNBUFFERED: '1' },
-        });
-        pythonService.stdout?.on('data', (data) => {
-            console.log(`[Python] ${data}`);
-        });
-        pythonService.stderr?.on('data', (data) => {
-            console.error(`[Python Error] ${data}`);
-        });
-        pythonService.on('exit', (code) => {
-            console.log(`Python service exited with code ${code}`);
-            pythonService = null;
-        });
-        // Wait a bit to see if service starts
-        setTimeout(() => {
-            resolve(pythonService !== null);
-        }, 2000);
-    });
-}
-function stopPythonService() {
-    if (pythonService) {
-        pythonService.kill();
-        pythonService = null;
-    }
-}
 // IPC Handlers
-electron_1.ipcMain.handle('start-service', async () => {
-    if (pythonService) {
-        return { success: true, message: 'Service already running' };
-    }
-    const success = await startPythonService();
-    return { success, message: success ? 'Service started' : 'Failed to start service' };
-});
-electron_1.ipcMain.handle('stop-service', () => {
-    stopPythonService();
-    return { success: true, message: 'Service stopped' };
-});
-electron_1.ipcMain.handle('get-service-status', async () => {
-    if (!pythonService) {
-        return { running: false };
-    }
-    // Check if service is responding
-    try {
-        const response = await fetch('http://127.0.0.1:17890/health');
-        return { running: response.ok };
-    }
-    catch {
-        return { running: false };
-    }
-});
-electron_1.ipcMain.handle('open-folder-picker', async () => {
-    const { dialog } = await Promise.resolve().then(() => __importStar(require('electron')));
-    const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openDirectory'],
+electron_1.ipcMain.handle('download-bundle', async (event, { device, buildId, apiBase, apiKey, cacheDir }) => {
+    return new Promise((resolve, reject) => {
+        const downloaderPath = path_1.default.join(__dirname, '../../../../backend/downloader.py');
+        const pythonPath = process.platform === 'darwin'
+            ? '/usr/bin/python3'
+            : 'python3';
+        const downloadProcess = (0, child_process_1.spawn)(pythonPath, [
+            downloaderPath,
+            '--api-base', apiBase,
+            '--api-key', apiKey,
+            '--cache-dir', cacheDir,
+            '--device', device,
+            '--build-id', buildId,
+            '--format', 'zip'
+        ], {
+            cwd: path_1.default.dirname(downloaderPath),
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        });
+        let stdout = '';
+        let stderr = '';
+        downloadProcess.stdout.on('data', (data) => {
+            const text = data.toString();
+            stdout += text;
+            // Emit progress updates
+            const lines = text.split('\n').filter((l) => l.trim());
+            lines.forEach((line) => {
+                if (line.includes('Progress:')) {
+                    const match = line.match(/(\d+\.\d+)%/);
+                    if (match) {
+                        mainWindow?.webContents.send('download-progress', {
+                            percent: parseFloat(match[1]),
+                            message: line
+                        });
+                    }
+                }
+                else if (line.includes('✓') || line.includes('ERROR')) {
+                    mainWindow?.webContents.send('download-log', line);
+                }
+            });
+        });
+        downloadProcess.stderr.on('data', (data) => {
+            stderr += data.toString();
+            const lines = data.toString().split('\n').filter((l) => l.trim());
+            lines.forEach((line) => {
+                mainWindow?.webContents.send('download-log', line);
+            });
+        });
+        downloadProcess.on('close', (code) => {
+            if (code === 0) {
+                try {
+                    // Parse JSON result from stdout
+                    const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const result = JSON.parse(jsonMatch[0]);
+                        resolve(result);
+                    }
+                    else {
+                        reject(new Error('No JSON result found'));
+                    }
+                }
+                catch (e) {
+                    reject(new Error(`Failed to parse result: ${e}`));
+                }
+            }
+            else {
+                reject(new Error(`Downloader exited with code ${code}: ${stderr}`));
+            }
+        });
+        downloadProcess.on('error', (error) => {
+            reject(new Error(`Failed to start downloader: ${error.message}`));
+        });
     });
-    return result.canceled ? null : result.filePaths[0];
+});
+electron_1.ipcMain.handle('flash-device', async (event, { bundlePath, deviceSerial, fastbootPath, adbPath, confirm }) => {
+    return new Promise((resolve, reject) => {
+        const flasherPath = path_1.default.join(__dirname, '../../../../backend/flasher.py');
+        const pythonPath = process.platform === 'darwin'
+            ? '/usr/bin/python3'
+            : 'python3';
+        const args = [
+            flasherPath,
+            '--fastboot-path', fastbootPath,
+            '--adb-path', adbPath,
+            '--bundle-path', bundlePath,
+        ];
+        if (deviceSerial) {
+            args.push('--device-serial', deviceSerial);
+        }
+        if (confirm) {
+            args.push('--confirm');
+        }
+        const flashProcess = (0, child_process_1.spawn)(pythonPath, args, {
+            cwd: path_1.default.dirname(flasherPath),
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        });
+        let stdout = '';
+        let stderr = '';
+        flashProcess.stdout.on('data', (data) => {
+            const text = data.toString();
+            stdout += text;
+            // Parse JSON logs
+            const lines = text.split('\n').filter((l) => l.trim());
+            lines.forEach((line) => {
+                try {
+                    const log = JSON.parse(line);
+                    mainWindow?.webContents.send('flash-log', log);
+                }
+                catch (e) {
+                    // Not JSON, send as plain message
+                    mainWindow?.webContents.send('flash-log', {
+                        type: 'info',
+                        message: line
+                    });
+                }
+            });
+        });
+        flashProcess.stderr.on('data', (data) => {
+            stderr += data.toString();
+            const lines = data.toString().split('\n').filter((l) => l.trim());
+            lines.forEach((line) => {
+                mainWindow?.webContents.send('flash-log', {
+                    type: 'error',
+                    message: line
+                });
+            });
+        });
+        flashProcess.on('close', (code) => {
+            if (code === 0) {
+                try {
+                    const jsonMatch = stdout.match(/\{[\s\S]*"success"[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const result = JSON.parse(jsonMatch[0]);
+                        resolve(result);
+                    }
+                    else {
+                        resolve({ success: true, message: 'Flash completed' });
+                    }
+                }
+                catch (e) {
+                    resolve({ success: true, message: 'Flash completed' });
+                }
+            }
+            else {
+                reject(new Error(`Flasher exited with code ${code}: ${stderr}`));
+            }
+        });
+        flashProcess.on('error', (error) => {
+            reject(new Error(`Failed to start flasher: ${error.message}`));
+        });
+    });
+});
+electron_1.ipcMain.handle('get-env-config', async () => {
+    return envConfig;
 });
 electron_1.app.whenReady().then(() => {
     createWindow();
-    // Auto-start Python service in production
-    if (!isDev) {
-        startPythonService();
-    }
     electron_1.app.on('activate', () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0) {
             createWindow();
@@ -172,16 +218,7 @@ electron_1.app.whenReady().then(() => {
     });
 });
 electron_1.app.on('window-all-closed', () => {
-    stopPythonService();
     if (process.platform !== 'darwin') {
         electron_1.app.quit();
     }
 });
-electron_1.app.on('before-quit', () => {
-    stopPythonService();
-});
-// Prevent multiple instances
-const gotTheLock = electron_1.app.requestSingleInstanceLock();
-if (!gotTheLock) {
-    electron_1.app.quit();
-}

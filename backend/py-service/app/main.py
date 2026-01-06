@@ -4,8 +4,21 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uvicorn
+import logging
 from .config import settings
 from .routes import devices, bundles, flash, source, build
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("Starting FlashDash API server")
 
 app = FastAPI(
     title="FlashDash API",
