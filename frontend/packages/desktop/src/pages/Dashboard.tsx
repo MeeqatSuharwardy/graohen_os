@@ -9,6 +9,7 @@ import { apiClient } from '../lib/api';
 import { DownloadDialog } from '../components/DownloadDialog';
 import { FlashDialog } from '../components/FlashDialog';
 import { UnlockAndFlashButton } from '../components/UnlockAndFlashButton';
+import { FastbootFlashButton } from '../components/FastbootFlashButton';
 
 interface Device {
   id: string;
@@ -189,53 +190,61 @@ export function Dashboard() {
                           Identify
                         </Button>
                       )}
-                      {device.codename && (
+                      {/* Show Flash buttons if device is in fastboot mode */}
+                      {device.state === 'fastboot' ? (
                         <>
-                          {device.state === 'fastboot' ? (
-                            <UnlockAndFlashButton
-                              device={device}
-                              trigger={
-                                <Button size="sm" className="bg-primary">
-                                  <Unlock className="w-4 h-4 mr-2" />
-                                  Unlock & Flash
-                                </Button>
-                              }
-                            />
-                          ) : (
-                            <>
-                              {device.state === 'device' && (
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => handleRebootToBootloader(device.id)}
-                                >
-                                  <Power className="w-4 h-4 mr-2" />
-                                  Reboot to Fastboot
-                                </Button>
-                              )}
-                              <DownloadDialog
-                                codename={device.codename}
-                                deviceName={device.deviceName}
-                                trigger={
-                                  <Button size="sm" variant="outline">
-                                    <Download className="w-4 h-4 mr-2" />
-                                    Download Build
-                                  </Button>
-                                }
-                              />
-                              <FlashDialog
-                                device={device}
-                                trigger={
-                                  <Button size="sm">
-                                    <Zap className="w-4 h-4 mr-2" />
-                                    Flash
-                                  </Button>
-                                }
-                              />
-                            </>
-                          )}
+                          <FastbootFlashButton
+                            device={device}
+                            trigger={
+                              <Button size="sm" variant="default">
+                                <Zap className="w-4 h-4 mr-2" />
+                                Flash
+                              </Button>
+                            }
+                          />
+                          <UnlockAndFlashButton
+                            device={device}
+                            trigger={
+                              <Button size="sm" variant="outline">
+                                <Unlock className="w-4 h-4 mr-2" />
+                                Unlock & Flash
+                              </Button>
+                            }
+                          />
                         </>
-                      )}
+                      ) : device.codename ? (
+                        <>
+                          {device.state === 'device' && (
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => handleRebootToBootloader(device.id)}
+                            >
+                              <Power className="w-4 h-4 mr-2" />
+                              Reboot to Fastboot
+                            </Button>
+                          )}
+                          <DownloadDialog
+                            codename={device.codename}
+                            deviceName={device.deviceName}
+                            trigger={
+                              <Button size="sm" variant="outline">
+                                <Download className="w-4 h-4 mr-2" />
+                                Download Build
+                              </Button>
+                            }
+                          />
+                          <FlashDialog
+                            device={device}
+                            trigger={
+                              <Button size="sm">
+                                <Zap className="w-4 h-4 mr-2" />
+                                Flash
+                              </Button>
+                            }
+                          />
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </motion.div>

@@ -178,7 +178,7 @@ export function UnlockAndFlashButton({ device, trigger }: UnlockAndFlashButtonPr
     e?.preventDefault();
     e?.stopPropagation();
     
-    // Prevent double-clicks
+    // Prevent double-clicks - check processing state FIRST before any async operations
     if (processing) {
       console.log('Already processing, ignoring click');
       return;
@@ -191,6 +191,7 @@ export function UnlockAndFlashButton({ device, trigger }: UnlockAndFlashButtonPr
       return;
     }
 
+    // Set processing IMMEDIATELY to prevent double-clicks
     setProcessing(true);
     setError(null);
     setLogs(['Starting unlock and flash process...']);

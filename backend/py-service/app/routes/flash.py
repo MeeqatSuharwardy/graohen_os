@@ -191,28 +191,55 @@ async def unlock_and_flash(request: UnlockAndFlashRequest):
         bundle_path = request.bundle_path
         
         if not bundle_path:
-            # Identify device to get codename
+            # Try to identify device to get codename
             device_info = identify_device(request.device_serial)
             
-            if not device_info:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Could not identify device codename for serial: {request.device_serial}. "
-                           f"Please ensure device is connected and in fastboot mode, or provide bundle_path."
-                )
-            
-            codename = device_info["codename"]
-            
-            # Find the latest bundle for this codename
-            bundle = get_bundle_for_codename(codename)
-            if not bundle:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No bundle found for device codename: {codename}. "
-                           f"Please download a bundle first or specify bundle_path."
-                )
-            
-            bundle_path = bundle["path"]
+            if device_info:
+                # Device identified successfully - use its codename
+                codename = device_info["codename"]
+                
+                # Find the latest bundle for this codename
+                bundle = get_bundle_for_codename(codename)
+                if bundle:
+                    bundle_path = bundle["path"]
+                else:
+                    # Device identified but no bundle found - check for any bundles
+                    all_bundles = index_bundles()
+                    if all_bundles:
+                        # Use the first available bundle as fallback
+                        first_codename = list(all_bundles.keys())[0]
+                        bundle = get_bundle_for_codename(first_codename)
+                        if bundle:
+                            bundle_path = bundle["path"]
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Device identified as {codename} but no bundle found. "
+                                   f"Please download a bundle first or specify bundle_path."
+                        )
+            else:
+                # Device identification failed (may be rebooting or timing out)
+                # Try to use any available bundle as fallback
+                all_bundles = index_bundles()
+                if not all_bundles:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Could not identify device codename for serial: {request.device_serial} "
+                               f"and no bundles found. Please ensure the device is connected and in fastboot mode, "
+                               f"or download a bundle first, or provide bundle_path."
+                    )
+                
+                # Use the first available bundle as fallback
+                first_codename = list(all_bundles.keys())[0]
+                bundle = get_bundle_for_codename(first_codename)
+                if bundle:
+                    bundle_path = bundle["path"]
+                else:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Could not identify device and no valid bundles found. "
+                               f"Please download a bundle first or specify bundle_path."
+                    )
         
         # Find extracted bundle directory (handle both zip and extracted)
         bundle_path_obj = Path(bundle_path)

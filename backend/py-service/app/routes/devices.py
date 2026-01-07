@@ -11,12 +11,20 @@ async def list_devices():
     """List all connected devices"""
     devices = get_devices()
     
-    # Try to identify each device
+    # Try to identify each device (with timeout handling)
     for device in devices:
         if device["state"] in ["device", "fastboot"]:
-            identification = identify_device(device["serial"])
-            if identification:
-                device.update(identification)
+            try:
+                identification = identify_device(device["serial"])
+                if identification:
+                    device.update(identification)
+            except Exception as e:
+                # Log but don't fail - device list should still be returned
+                # even if identification fails (e.g., device is rebooting)
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Could not identify device {device['serial']}: {e}")
+                # Continue with other devices
     
     return devices
 
@@ -44,10 +52,17 @@ async def reboot_to_bootloader(device_id: str):
     """Reboot device to bootloader"""
     result = run_adb_command(["reboot", "bootloader"], serial=device_id)
     
-    if result.returncode != 0:
+    if not result:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to reboot: {result.stderr}"
+            detail="Failed to execute reboot command (device may be unresponsive)"
+        )
+    
+    if result.returncode != 0:
+        error_msg = result.stderr if result.stderr else result.stdout or "Unknown error"
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reboot: {error_msg}"
         )
     
     return {"success": True, "message": "Device rebooting to bootloader"}
