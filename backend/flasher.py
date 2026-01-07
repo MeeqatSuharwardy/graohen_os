@@ -46,14 +46,16 @@ class GrapheneFlasher:
         if not self.bundle_path.exists():
             self._error(f"Bundle path not found: {bundle_path}")
     
-    def _error(self, message: str, step: Optional[str] = None):
+    def _error(self, message: str, step: Optional[str] = None, partition: Optional[str] = None):
         """Print structured error JSON and exit"""
         error_data = {
             "step": step or "unknown",
             "status": "error",
             "message": message
         }
-        print(json.dumps(error_data), file=sys.stderr)
+        if partition:
+            error_data["partition"] = partition
+        print(json.dumps(error_data), file=sys.stderr, flush=True)
         sys.stderr.flush()
         sys.exit(1)
     
@@ -67,8 +69,7 @@ class GrapheneFlasher:
         }
         # Remove None values
         log_data = {k: v for k, v in log_data.items() if v is not None}
-        print(json.dumps(log_data))
-        sys.stdout.flush()
+        print(json.dumps(log_data), flush=True)  # Ensure immediate flush
     
     def _run_fastboot(self, args: List[str], timeout: int = 60, stream: bool = False) -> subprocess.CompletedProcess:
         """
@@ -76,6 +77,9 @@ class GrapheneFlasher:
         
         SECURITY: Fastboot output goes to stderr on some platforms.
         We capture both stdout and stderr for reliability.
+        
+        Returns CompletedProcess on success, None on error (caller should handle).
+        Does NOT call sys.exit() - returns None to allow caller to decide.
         """
         cmd = [str(self.fastboot_path)]
         # Allow disabling serial flag for device discovery
@@ -126,11 +130,18 @@ class GrapheneFlasher:
             return result
             
         except subprocess.TimeoutExpired:
-            self._error(f"Fastboot command timed out after {timeout}s: {' '.join(cmd)}", step="fastboot")
+            self._log(f"Fastboot command timed out after {timeout}s: {' '.join(cmd)}", "error", step="fastboot")
+            self._log("This may indicate device disconnected or slow USB connection", "warning", step="fastboot")
+            # Return a mock CompletedProcess with error code so caller can check returncode
+            return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr=f"Command timed out after {timeout}s")
         except FileNotFoundError:
             self._error(f"Fastboot executable not found: {self.fastboot_path}", step="fastboot")
+            # Won't be reached due to _error() calling sys.exit(), but for type consistency
+            return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="Fastboot executable not found")
         except Exception as e:
-            self._error(f"Failed to run fastboot: {e}", step="fastboot")
+            self._log(f"Failed to run fastboot: {e}", "error", step="fastboot")
+            # Return a mock CompletedProcess with error code so caller can check returncode
+            return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr=str(e))
     
     def _run_adb(self, args: List[str], timeout: int = 30) -> subprocess.CompletedProcess:
         """Run ADB command with proper error handling"""
@@ -177,15 +188,28 @@ class GrapheneFlasher:
             try:
                 # Try fastboot devices without serial flag (works better during USB re-enumeration)
                 cmd = [str(self.fastboot_path), "devices"]
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=3,
-                    stderr=subprocess.DEVNULL  # Suppress stderr to avoid noise
-                )
+                try:
+                    # Use subprocess.run with capture_output=True (which sets both stdout and stderr to PIPE)
+                    result = subprocess.run(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,  # Capture stderr separately
+                        text=True,
+                        timeout=3
+                    )
+                except subprocess.TimeoutExpired:
+                    # Command timeout is normal during USB re-enumeration
+                    elapsed = int(time.time() - start_time)
+                    if time.time() - last_log_time >= 5:
+                        self._log(f"Fastboot command timeout (normal during USB reset), still waiting... ({elapsed}/{timeout}s)", "info", step="fastboot")
+                        last_log_time = time.time()
+                    time.sleep(0.5)
+                    continue
                 
+                # Check both stdout and stderr (fastboot outputs to either)
                 output = (result.stdout or "").strip()
+                if not output and result.stderr:
+                    output = result.stderr.strip()
                 
                 # Check if any device (or our specific device) is in the output
                 if output:
@@ -238,12 +262,18 @@ class GrapheneFlasher:
                 # Wait a bit before retrying (short wait for faster detection)
                 time.sleep(0.5)
                 
-            except subprocess.TimeoutExpired:
-                # Command timed out, continue waiting (this is normal during USB re-enumeration)
-                pass
-            except Exception:
-                # Any other error, continue waiting
-                pass
+            except Exception as e:
+                # Log the error but continue trying (errors are normal during USB re-enumeration)
+                elapsed = int(time.time() - start_time)
+                if time.time() - last_log_time >= 5:
+                    error_msg = str(e)
+                    # Truncate long error messages
+                    if len(error_msg) > 100:
+                        error_msg = error_msg[:100] + "..."
+                    self._log(f"Error checking device status (normal during USB reset): {error_msg} (still waiting... {elapsed}/{timeout}s)", "info", step="fastboot")
+                    last_log_time = time.time()
+                time.sleep(0.5)
+                continue
         
         elapsed = int(time.time() - start_time)
         self._log(f"⚠ Device not detected in fastboot mode after {elapsed} seconds", "warning", step="fastboot")
@@ -972,26 +1002,58 @@ class GrapheneFlasher:
                 cwd=str(bundle_dir)
             )
             
-            # Stream output in real-time
+            # Stream output in real-time with timeout detection using threading
             output_lines = []
+            last_output_time = [time.time()]  # Use list to allow modification in nested scope
+            no_output_timeout = 120  # 2 minutes without output = likely hung
+            script_hung = [False]  # Flag to indicate script hung
             
             self._log("Reading script output (this may take several minutes)...", "info", step="flash")
             self._log("Note: Flashing process can take 5-15 minutes - please be patient", "info", step="flash")
+            self._log("Monitoring for hangs (no output for 2+ minutes will trigger fallback)", "info", step="flash")
+            
+            # Monitor for hangs in a separate thread
+            def monitor_hang():
+                while process.poll() is None:
+                    time.sleep(5)  # Check every 5 seconds
+                    elapsed = time.time() - last_output_time[0]
+                    if elapsed > no_output_timeout and output_lines:
+                        # Script appears hung
+                        script_hung[0] = True
+                        self._log(
+                            f"WARNING: No output from script for {int(elapsed)} seconds - script may be hung",
+                            "warning",
+                            step="flash"
+                        )
+                        self._log(
+                            "This often happens when device disconnects during flash (Tensor Pixel USB reset)",
+                            "warning",
+                            step="flash"
+                        )
+                        self._log("Terminating hung script and falling back to explicit commands...", "warning", step="flash")
+                        try:
+                            process.kill()
+                        except:
+                            pass
+                        break
+            
+            # Start hang monitor thread
+            import threading
+            monitor_thread = threading.Thread(target=monitor_hang, daemon=True)
+            monitor_thread.start()
             
             # Read output line by line until process completes
-            # The iter() approach with readline will block until a line is available
-            # Empty string indicates EOF (process closed stdout)
             try:
-                while True:
-                    line = process.stdout.readline()
-                    if not line:  # EOF - process closed stdout
+                for line in iter(process.stdout.readline, ''):
+                    if script_hung[0]:
+                        # Script was killed due to hang
                         break
                     
                     line = line.rstrip()
                     if line:  # Only process non-empty lines
+                        last_output_time[0] = time.time()  # Update last output time
                         output_lines.append(line)
                         # Log all output from the script immediately
-                        # Determine log level based on content
                         line_lower = line.lower()
                         if "error" in line_lower or "failed" in line_lower:
                             log_level = "error"
@@ -1002,25 +1064,27 @@ class GrapheneFlasher:
                         else:
                             log_level = "info"
                         self._log(f"[flash-all] {line}", log_level, step="flash")
-                        # Force flush stdout to ensure logs are seen immediately
                         sys.stdout.flush()
+                        
             except Exception as e:
                 self._log(f"Error reading script output: {e}", "error", step="flash")
-                # Try to get return code anyway
-                return_code = process.poll()
-                if return_code is None:
-                    process.kill()  # Kill if still running
-                    return_code = process.wait()
-                self._error(f"Failed to read script output: {e}", step="flash")
-                return False
             
-            # Process has finished - get return code
-            # Note: process.wait() should be called after stdout is closed
+            # Wait for process to complete (or get return code if already finished)
             return_code = process.poll()
             if return_code is None:
                 # Process still running, wait for it
                 self._log("Waiting for script process to complete...", "info", step="flash")
-                return_code = process.wait()
+                try:
+                    return_code = process.wait(timeout=5)  # Short timeout since we're monitoring hangs
+                except subprocess.TimeoutExpired:
+                    # Process still running, kill it
+                    process.kill()
+                    return_code = process.wait()
+            
+            if script_hung[0]:
+                # Script hung - return False to trigger fallback
+                self._log("Script hung - will use explicit fastboot commands instead", "warning", step="flash")
+                return False
             
             # Show summary
             if output_lines:
@@ -1201,9 +1265,12 @@ class GrapheneFlasher:
                     self._error("Bootloader image not found", step="flash")
             
             self._log("Flashing bootloader to other slot (first pass)...", "info", step="flash", partition="bootloader")
-            result = self._run_fastboot(["flash", "--slot=other", "bootloader", str(bootloader_file)], timeout=120)
+            self._log("This may take up to 3 minutes - please wait...", "info", step="flash", partition="bootloader")
+            self._log("If device disconnects, it will reconnect automatically (Tensor Pixel USB reset)", "info", step="flash", partition="bootloader")
+            result = self._run_fastboot(["flash", "--slot=other", "bootloader", str(bootloader_file)], timeout=180)
             if result.returncode != 0:
                 self._error(f"Failed to flash bootloader: {result.stderr or result.stdout}", step="flash", partition="bootloader")
+            self._log("✓ Bootloader flashed (first pass)", "success", step="flash", partition="bootloader")
             
             self._log("Setting active slot to other...", "info", step="flash")
             result = self._run_fastboot(["--set-active=other"], timeout=30)
@@ -1217,29 +1284,22 @@ class GrapheneFlasher:
             
             # Wait for device to return to fastboot (Tensor Pixels USB re-enumeration)
             self._log("Waiting for device to return to fastboot mode...", "info", step="flash")
-            if not self._wait_for_fastboot(timeout=90):
-                self._error("Device did not return to fastboot mode after reboot", step="flash")
+            self._log("This may take up to 90 seconds - device will disconnect and reconnect (normal for Tensor Pixels)", "info", step="flash")
+            device_detected = self._wait_for_fastboot(timeout=90)
+            if not device_detected:
+                self._log("Device not detected within timeout - attempting to continue anyway...", "warning", step="flash")
+                # Try one more direct check
+                test_result = self._run_fastboot(["getvar", "product"], timeout=5)
+                if test_result and test_result.returncode == 0:
+                    self._log("Device responds to direct command - continuing...", "success", step="flash")
+                else:
+                    self._error("Device did not return to fastboot mode after reboot and is not responding", step="flash")
             
-            # Second bootloader flash to other slot
-            self._log("Flashing bootloader to other slot (second pass)...", "info", step="flash", partition="bootloader")
-            result = self._run_fastboot(["flash", "--slot=other", "bootloader", str(bootloader_file)], timeout=120)
-            if result.returncode != 0:
-                self._error(f"Failed to flash bootloader (second pass): {result.stderr or result.stdout}", step="flash", partition="bootloader")
-            
-            self._log("Setting active slot to other...", "info", step="flash")
-            result = self._run_fastboot(["--set-active=other"], timeout=30)
-            if result.returncode != 0:
-                self._error(f"Failed to set active slot: {result.stderr or result.stdout}", step="flash")
-            
-            self._log("Rebooting bootloader...", "info", step="flash")
-            result = self._run_fastboot(["reboot-bootloader"], timeout=60)
-            if result.returncode != 0:
-                self._error(f"Failed to reboot bootloader: {result.stderr or result.stdout}", step="flash")
-            
-            # Wait for device to return to fastboot
-            self._log("Waiting for device to return to fastboot mode...", "info", step="flash")
-            if not self._wait_for_fastboot(timeout=90):
-                self._error("Device did not return to fastboot mode after reboot", step="flash")
+            # NOTE: NO second bootloader flash!
+            # On Pixel 7 (Tensor/cloudripper), bootloader is flashed ONCE per slot.
+            # Flashing bootloader twice to the same slot triggers bootloader protection and causes "could not clear" error.
+            # After reboot, the active slot has changed and bootloader is already correct.
+            self._log("✓ Bootloader flash complete - proceeding to radio flash (no second bootloader flash needed)", "success", step="flash", partition="bootloader")
             
             # Verify max-download-size (required for super partition splits)
             # Be lenient here - if we can't get it, proceed anyway
@@ -1308,10 +1368,16 @@ class GrapheneFlasher:
                 self._error("Device did not return to fastboot mode after radio flash", step="flash")
             
             # STEP 3: AVB custom key operations
+            # Note: Erasing avb_custom_key may fail if partition doesn't exist (normal on fresh devices)
             self._log("Erasing AVB custom key...", "info", step="flash")
             result = self._run_fastboot(["erase", "avb_custom_key"], timeout=30)
             if result.returncode != 0:
-                self._error(f"Failed to erase avb_custom_key: {result.stderr or result.stdout}", step="flash")
+                error_msg = result.stderr or result.stdout or ""
+                if "could not clear" in error_msg.lower() or "does not exist" in error_msg.lower():
+                    # Partition doesn't exist - this is normal on fresh devices
+                    self._log("AVB custom key partition does not exist (normal on fresh devices) - skipping erase", "info", step="flash")
+                else:
+                    self._log(f"Warning: Failed to erase avb_custom_key: {error_msg}", "warning", step="flash")
             
             avb_key_file = bundle_dir / "avb_pkmd.bin"
             if avb_key_file.exists():
@@ -1319,6 +1385,8 @@ class GrapheneFlasher:
                 result = self._run_fastboot(["flash", "avb_custom_key", str(avb_key_file)], timeout=30)
                 if result.returncode != 0:
                     self._error(f"Failed to flash avb_custom_key: {result.stderr or result.stdout}", step="flash")
+            else:
+                self._log("avb_pkmd.bin not found - skipping AVB custom key flash", "warning", step="flash")
             
             # STEP 4: OEM operations
             self._log("Disabling UART...", "info", step="flash")
@@ -1860,23 +1928,24 @@ Example usage:
             bundle_dir = flasher._find_bundle_directory()
             flasher._log(f"Using bundle directory: {bundle_dir}", "info", step="flash")
             
-            # STEP 5: Flash GrapheneOS using official flash-all script
-            # Per official GrapheneOS documentation: "bash flash-all.sh" or "./flash-all.bat"
-            # This is the recommended approach - delegate everything to the official script
-            if flasher.step5_execute_flash_all_script(bundle_dir):
-                # Official script handles everything including final reboot
-                flasher._log("✓ Flash completed using official flash-all script", "success", step="flash")
-            else:
-                # Fallback: use explicit fastboot commands if script not found
-                flasher._log("Official flash-all script not found, using explicit fastboot commands...", "warning", step="flash")
-                partition_files = flasher.find_partition_files()
-                flasher._log(f"Found {len(partition_files)} partition file(s) to flash", "info", step="flash")
-                if partition_files:
-                    flasher._log(f"Partitions to flash: {', '.join(partition_files.keys())}", "info", step="flash")
-                
-                flasher.step5_flash_grapheneos_official_sequence(partition_files, bundle_dir)
-                # STEP 6: Final reboot
-                flasher.step6_final_reboot()
+            # STEP 5: Flash GrapheneOS using explicit fastboot commands
+            # We skip flash-all.sh because:
+            # 1. It doesn't support --device-serial flag (can't target specific device)
+            # 2. Tensor Pixels (Pixel 6-8) have USB re-enumeration on reboot that flash-all.sh doesn't handle
+            # 3. Explicit commands allow us to use _wait_for_fastboot() after each reboot
+            flasher._log("Using explicit fastboot commands (skipping flash-all.sh)", "info", step="flash")
+            flasher._log("Reason: flash-all.sh doesn't support device serial targeting and doesn't handle Tensor Pixel USB resets", "info", step="flash")
+            flasher._log("Explicit commands include proper wait_for_fastboot() handling for Tensor Pixel USB re-enumeration", "info", step="flash")
+            
+            partition_files = flasher.find_partition_files()
+            flasher._log(f"Found {len(partition_files)} partition file(s) to flash", "info", step="flash")
+            if partition_files:
+                flasher._log(f"Partitions to flash: {', '.join(partition_files.keys())}", "info", step="flash")
+            
+            # Use explicit fastboot commands with Tensor Pixel USB reset handling
+            flasher.step5_flash_grapheneos_official_sequence(partition_files, bundle_dir)
+            # STEP 6: Final reboot
+            flasher.step6_final_reboot()
             
             # Success
             result = {

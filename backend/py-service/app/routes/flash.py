@@ -419,15 +419,38 @@ def _run_unlock_and_flash(job: dict, flasher_script: Path, bundle_path: Path, de
             try:
                 logger.info("Starting output reader thread")
                 line_count = 0
+                # Give process a moment to start producing output
+                import time
+                time.sleep(0.1)
+                
+                # Check if process is still alive
+                if process.poll() is not None:
+                    logger.warning(f"Process already exited with code {process.poll()} before reading output")
+                
                 for line in iter(process.stdout.readline, ''):
                     if line:
                         line_stripped = line.rstrip()
                         output_lines.append(line_stripped)
                         line_count += 1
-                        logger.debug(f"Received line {line_count}: {line_stripped[:100]}...")  # Log first 100 chars
+                        logger.info(f"Received line {line_count}: {line_stripped[:100]}...")  # Changed to INFO for debugging
                         # Process immediately for real-time updates
                         _process_flasher_output(job, line_stripped, job_id)
+                
                 logger.info(f"Output reader thread finished. Total lines read: {line_count}")
+                if line_count == 0:
+                    logger.warning("No output lines were read from process!")
+                    # Try to read any remaining data
+                    try:
+                        remaining = process.stdout.read()
+                        if remaining:
+                            logger.info(f"Found remaining output: {remaining[:200]}")
+                            for line in remaining.splitlines():
+                                if line.strip():
+                                    output_lines.append(line.strip())
+                                    _process_flasher_output(job, line.strip(), job_id)
+                    except:
+                        pass
+                
                 process.stdout.close()
             except Exception as e:
                 logger.error(f"Error in output reader thread: {e}", exc_info=True)
