@@ -15,6 +15,7 @@ venv/
 ENV/
 env/
 bundles/
+Archives/
 # Build outputs
 dist/
 build/

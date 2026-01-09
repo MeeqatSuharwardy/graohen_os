@@ -59,15 +59,25 @@ def run_fastboot_command(args: List[str], serial: Optional[str] = None, timeout:
     cmd.extend(args)
     
     try:
+        # Run fastboot command
+        # Note: fastboot often outputs to stderr, even for successful commands
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
+            # Don't fail on non-zero return codes - fastboot can return non-zero on warnings
         )
         
+        # Log command execution for debugging (only in debug mode)
+        logger.debug(f"Fastboot command: {' '.join(cmd)}, returncode: {result.returncode}")
+        if result.stdout:
+            logger.debug(f"Fastboot stdout: {result.stdout[:200]}")
+        if result.stderr:
+            logger.debug(f"Fastboot stderr: {result.stderr[:200]}")
+        
         # Fastboot sometimes returns non-zero exit codes even on success
-        # Check if we got valid output instead of relying solely on returncode
+        # Always return the result so caller can check output
         return result
     except subprocess.TimeoutExpired as e:
         logger.warning(f"Fastboot command timed out after {timeout}s: {' '.join(cmd)}")
@@ -79,8 +89,14 @@ def run_fastboot_command(args: List[str], serial: Optional[str] = None, timeout:
             stderr=f"Command timed out after {timeout} seconds (device may be rebooting)"
         )
         return result
+    except FileNotFoundError:
+        logger.error(f"Fastboot not found at path: {settings.FASTBOOT_PATH}")
+        return None
+    except PermissionError:
+        logger.error(f"Permission denied running fastboot: {settings.FASTBOOT_PATH}. May need USB permissions or sudo.")
+        return None
     except Exception as e:
-        logger.error(f"Error running fastboot command {' '.join(cmd)}: {e}")
+        logger.error(f"Error running fastboot command {' '.join(cmd)}: {e}", exc_info=True)
         return None
 
 
@@ -91,40 +107,145 @@ def get_devices() -> List[Dict[str, str]]:
     # Get ADB devices
     try:
         result = run_adb_command(["devices"], timeout=10)
-        if result and result.returncode == 0:
-            for line in result.stdout.strip().split("\n")[1:]:  # Skip header
-                if line.strip():
+        if result:
+            # ADB outputs to stdout, but check both for robustness
+            output = result.stdout.strip() if result.stdout else ""
+            if not output and result.stderr:
+                output = result.stderr.strip()
+            
+            if output:
+                lines = output.split("\n")
+                for line in lines:
+                    line = line.strip()
+                    if not line or line.startswith("List of devices") or line.startswith("* daemon"):
+                        continue
+                    
                     parts = line.split()
                     if len(parts) >= 2:
-                        devices.append({
-                            "id": parts[0],
-                            "serial": parts[0],
-                            "state": parts[1],
-                        })
+                        serial = parts[0].strip()
+                        state = parts[1].strip()
+                        if serial and len(serial) > 3:  # Valid serial numbers are longer
+                            devices.append({
+                                "id": serial,
+                                "serial": serial,
+                                "state": state,
+                            })
     except Exception as e:
         logger.warning(f"Error getting ADB devices: {e}")
     
     # Get Fastboot devices
     try:
-        result = run_fastboot_command(["devices"], timeout=10)
-        if result and result.returncode == 0:
-            output = result.stdout.strip() if result.stdout else ""
-            if not output and result.stderr:
-                output = result.stderr.strip()
+        # Fastboot devices command - don't use serial flag when listing all devices
+        result = run_fastboot_command(["devices"], timeout=15)
+        
+        if result is None:
+            logger.debug("Fastboot devices command returned None")
+        else:
+            # Fastboot outputs can be in stdout, stderr, or both
+            # Also, fastboot may return non-zero exit codes even when it succeeds
+            stdout = result.stdout.strip() if result.stdout else ""
+            stderr = result.stderr.strip() if result.stderr else ""
             
-            for line in output.split("\n"):
-                line = line.strip()
-                if line and "\t" in line:
-                    serial = line.split("\t")[0].strip()
-                    # Check if not already in devices list
-                    if serial and not any(d["serial"] == serial for d in devices):
-                        devices.append({
-                            "id": serial,
-                            "serial": serial,
-                            "state": "fastboot",
-                        })
+            # Log raw output for debugging
+            logger.debug(f"Fastboot devices - returncode: {result.returncode}, stdout: {repr(stdout)}, stderr: {repr(stderr)}")
+            
+            # Combine outputs - fastboot often uses stderr for device list
+            # Standard format: "SERIAL\tfastboot" or "SERIAL\tfastboot\n"
+            combined_output = ""
+            if stdout:
+                combined_output = stdout
+            if stderr:
+                # If stdout exists, append stderr; otherwise use stderr
+                if combined_output:
+                    combined_output = f"{combined_output}\n{stderr}"
+                else:
+                    combined_output = stderr
+            
+            # Also check if command succeeded even with non-zero returncode
+            # (fastboot can return non-zero for warnings but still list devices)
+            if combined_output or result.returncode == 0:
+                # Fastboot doesn't have a header line like ADB
+                # Format examples:
+                # "SERIAL\tfastboot"
+                # "SERIAL\tfastboot\n"
+                # "SERIAL  fastboot" (space-separated)
+                # Sometimes just: "SERIAL"
+                
+                lines = combined_output.split("\n") if combined_output else []
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Filter out common non-device lines
+                    # But first check if it looks like a device line (has tab separator with serial)
+                    is_device_line = "\t" in line and len(line.split("\t")) >= 2
+                    
+                    if not is_device_line:
+                        line_lower = line.lower()
+                        skip_keywords = [
+                            "waiting", "finished", "total time", "error", 
+                            "sending", "okay", "booting", "rebooting",
+                            "usage:", "unknown command", "command not found",
+                            "fastboot:", "fastboot.exe", "fastboot version"
+                        ]
+                        # Skip lines that are clearly status/error messages
+                        if any(keyword in line_lower for keyword in skip_keywords):
+                            continue
+                        # Also skip lines that start with these patterns
+                        if line_lower.startswith(("error", "usage", "unknown")):
+                            continue
+                    
+                    serial = None
+                    state = "fastboot"
+                    
+                    # Try tab-separated format first (most common): "SERIAL\tfastboot"
+                    if "\t" in line:
+                        parts = line.split("\t")
+                        if len(parts) >= 1:
+                            serial = parts[0].strip()
+                            if len(parts) >= 2:
+                                state_part = parts[1].strip().lower()
+                                if state_part and state_part != "fastboot":
+                                    # Might have additional info, still valid
+                                    pass
+                    else:
+                        # Try space-separated format: "SERIAL fastboot" or just "SERIAL"
+                        parts = line.split()
+                        if len(parts) >= 1:
+                            # First part should be the serial
+                            potential_serial = parts[0].strip()
+                            # Serial numbers are typically 8+ characters, alphanumeric
+                            # Can contain hyphens, underscores
+                            if len(potential_serial) >= 6 and (
+                                potential_serial.replace("-", "").replace("_", "").isalnum() or
+                                all(c.isalnum() or c in "-_" for c in potential_serial)
+                            ):
+                                serial = potential_serial
+                    
+                    # Validate and add device
+                    if serial and len(serial) >= 6:
+                        # Additional validation - serial shouldn't be common words
+                        invalid_serials = ["list", "of", "devices", "attached", "unauthorized", "offline"]
+                        if serial.lower() not in invalid_serials:
+                            # Check if not already in devices list
+                            if not any(d["serial"] == serial for d in devices):
+                                logger.debug(f"Found fastboot device: {serial}")
+                                devices.append({
+                                    "id": serial,
+                                    "serial": serial,
+                                    "state": state,
+                                })
+                            else:
+                                logger.debug(f"Fastboot device {serial} already in list, skipping")
+                        else:
+                            logger.debug(f"Skipping invalid serial: {serial}")
+                    else:
+                        logger.debug(f"Could not extract valid serial from line: {line}")
+                        
     except Exception as e:
-        logger.warning(f"Error getting fastboot devices: {e}")
+        logger.error(f"Error getting fastboot devices: {e}", exc_info=True)
     
     return devices
 
