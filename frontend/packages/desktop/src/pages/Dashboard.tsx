@@ -55,7 +55,7 @@ export function Dashboard() {
 
   const handleIdentify = async (deviceId: string) => {
     try {
-      await apiClient.get(`/devices/${deviceId}/identify`);
+      const response = await apiClient.get(`/devices/${deviceId}/identify`);
       refreshDevices();
     } catch (err: any) {
       setError(err.message || 'Failed to identify device');

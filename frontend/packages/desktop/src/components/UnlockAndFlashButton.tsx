@@ -9,7 +9,7 @@ import {
 } from '@flashdash/ui';
 import { Button } from '@flashdash/ui';
 import { Alert, AlertDescription } from '@flashdash/ui';
-import { Loader2, Unlock, AlertCircle, CheckCircle2, Smartphone } from 'lucide-react';
+import { Loader2, Unlock, AlertCircle, CheckCircle2, Smartphone, Zap } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { EnableOemUnlockInstructions } from './EnableOemUnlockInstructions';
 
@@ -115,7 +115,7 @@ export function UnlockAndFlashButton({ device, trigger }: UnlockAndFlashButtonPr
           console.log('📋 Updating logs:', job.logs.length, 'lines');
           if (job.logs.length > 0) {
             console.log('📄 Logs content:');
-            job.logs.forEach((log: string, idx: number) => {
+            job.logs.forEach((log, idx) => {
               if (log.includes('ERROR') || log.includes('error') || log.includes('failed') || log.includes('Failed')) {
                 console.error(`  [${idx}] ❌ ${log}`);
               } else if (log.includes('Warning') || log.includes('warning') || log.includes('⚠')) {
@@ -138,15 +138,15 @@ export function UnlockAndFlashButton({ device, trigger }: UnlockAndFlashButtonPr
           console.error('❌ Job failed or cancelled:', job.status);
           console.error('📋 Final logs:', job.logs);
           if (job.logs && job.logs.length > 0) {
-            const errorLogs = job.logs.filter((log: string) => 
+            const errorLogs = job.logs.filter(log => 
               log.includes('ERROR') || log.includes('error') || log.includes('failed') || log.includes('Failed')
             );
             if (errorLogs.length > 0) {
               console.error('🚨 Error logs:');
-              errorLogs.forEach((log: string) => console.error('  ', log));
+              errorLogs.forEach(log => console.error('  ', log));
               
               // Check if error is about OEM unlocking being disabled
-              const oemUnlockError = errorLogs.some((log: string) => 
+              const oemUnlockError = errorLogs.some(log => 
                 log.includes('OEM unlocking is disabled') || 
                 log.includes('unlock is not allowed') ||
                 log.includes('flashing unlock is not allowed')

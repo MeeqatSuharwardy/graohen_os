@@ -11,7 +11,7 @@ import { Button } from '@flashdash/ui';
 import { Progress } from '@flashdash/ui';
 import { Badge } from '@flashdash/ui';
 import { Alert, AlertDescription } from '@flashdash/ui';
-import { Download, AlertCircle, Loader2, Copy, ExternalLink, Check } from 'lucide-react';
+import { Download, CheckCircle2, AlertCircle, Loader2, Copy, ExternalLink, Check } from 'lucide-react';
 import { apiClient } from '../lib/api';
 
 interface Release {

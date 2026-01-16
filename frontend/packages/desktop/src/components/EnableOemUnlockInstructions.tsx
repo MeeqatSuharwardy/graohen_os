@@ -7,7 +7,7 @@ import {
 } from '@flashdash/ui';
 import { Button } from '@flashdash/ui';
 import { Alert, AlertDescription } from '@flashdash/ui';
-import { AlertCircle, Smartphone, ChevronRight, Power } from 'lucide-react';
+import { CheckCircle2, Circle, AlertCircle, Smartphone, ChevronRight, Power } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { useState } from 'react';
 
