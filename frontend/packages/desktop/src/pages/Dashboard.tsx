@@ -7,7 +7,6 @@ import { Alert, AlertDescription, AlertTitle } from '@flashdash/ui';
 import { Activity, Smartphone, Download, AlertTriangle, CheckCircle2, Zap, Unlock, Power } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { DownloadDialog } from '../components/DownloadDialog';
-import { FlashDialog } from '../components/FlashDialog';
 import { UnlockAndFlashButton } from '../components/UnlockAndFlashButton';
 import { FastbootFlashButton } from '../components/FastbootFlashButton';
 
@@ -115,28 +114,6 @@ export function Dashboard() {
       <Card className="backdrop-blur-sm bg-card/80 border-border/50">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Zap className="w-5 h-5" />
-            Flash GrapheneOS
-          </CardTitle>
-          <CardDescription>
-            Enter purchase number to automatically flash using local build
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FlashDialog
-            trigger={
-              <Button className="w-full">
-                <Zap className="w-4 h-4 mr-2" />
-                Flash Device
-              </Button>
-            }
-          />
-        </CardContent>
-      </Card>
-
-      <Card className="backdrop-blur-sm bg-card/80 border-border/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
             <Smartphone className="w-5 h-5" />
             Connected Devices
           </CardTitle>
@@ -231,15 +208,6 @@ export function Dashboard() {
                               <Button size="sm" variant="outline">
                                 <Download className="w-4 h-4 mr-2" />
                                 Download Build
-                              </Button>
-                            }
-                          />
-                          <FlashDialog
-                            device={device}
-                            trigger={
-                              <Button size="sm">
-                                <Zap className="w-4 h-4 mr-2" />
-                                Flash
                               </Button>
                             }
                           />

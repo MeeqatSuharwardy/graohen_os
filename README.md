@@ -30,6 +30,7 @@ A production-ready monorepo for flashing GrapheneOS to Pixel devices via a React
 13. [WebUSB/WebADB Flasher](#webusbwebadb-flasher)
 14. [Troubleshooting](#troubleshooting)
 15. [Security](#security)
+16. [Domain Setup](#domain-setup)
 
 ---
 
@@ -245,6 +246,216 @@ This starts:
 
 ---
 
+## Local Development vs Production Deployment
+
+The project can run in two modes: **Local Development** and **Production Deployment (VPS)**. The main difference is the `.env` configuration files.
+
+### 🔧 Local Development Setup
+
+Use this configuration when developing on your local machine (macOS, Windows, Linux).
+
+#### Backend `.env` (Local Development)
+
+Create `backend/py-service/.env`:
+
+```bash
+# Application
+APP_NAME=GrapheneOS Installer API
+APP_VERSION=1.0.0
+DEBUG=True
+ENVIRONMENT=development
+
+# Server (localhost only)
+PY_HOST=127.0.0.1
+PY_PORT=17890
+
+# API Configuration
+API_V1_PREFIX=/api/v1
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+# CORS Configuration (LOCAL DEVELOPMENT)
+CORS_ORIGINS=http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174
+
+# ADB and Fastboot Paths
+# macOS (Homebrew):
+ADB_PATH=/opt/homebrew/bin/adb
+FASTBOOT_PATH=/opt/homebrew/bin/fastboot
+# OR
+# Linux:
+# ADB_PATH=/usr/local/bin/adb
+# FASTBOOT_PATH=/usr/local/bin/fastboot
+# Windows:
+# ADB_PATH=C:\platform-tools\adb.exe
+# FASTBOOT_PATH=C:\platform-tools\fastboot.exe
+
+# Bundle Storage (LOCAL PATH - adjust to your location)
+GRAPHENE_BUNDLE_PATH=~/bundles
+
+# APK Storage (LOCAL PATH - adjust to your location)
+APK_STORAGE_DIR=~/apks
+
+# Email Domain Configuration (not used in local dev)
+EMAIL_DOMAIN=localhost
+EXTERNAL_HTTPS_BASE_URL=http://localhost:17890
+
+# Security (for local development only)
+SECRET_KEY=dev-secret-key-change-in-production
+
+# Logging
+LOG_LEVEL=DEBUG
+LOG_FORMAT=json
+LOG_DIR=./logs
+```
+
+#### Frontend `.env` Files (Local Development)
+
+**Desktop App** (`frontend/packages/desktop/.env`):
+```bash
+# LOCAL DEVELOPMENT - Use localhost
+VITE_API_BASE_URL=http://127.0.0.1:17890
+```
+
+**Web App** (`frontend/packages/web/.env`):
+```bash
+# LOCAL DEVELOPMENT - Use localhost
+VITE_API_BASE_URL=http://127.0.0.1:17890
+```
+
+**Web Flasher** (`frontend/apps/web-flasher/.env`):
+```bash
+# LOCAL DEVELOPMENT - Use localhost
+VITE_API_BASE_URL=http://127.0.0.1:17890
+```
+
+#### Running Locally
+
+```bash
+# Terminal 1: Backend
+cd backend/py-service
+source venv/bin/activate
+uvicorn app.main:app --reload --host 127.0.0.1 --port 17890
+
+# Terminal 2: Frontend
+cd frontend
+pnpm dev
+```
+
+**Access Points:**
+- Backend API: `http://127.0.0.1:17890`
+- Web App: `http://localhost:5173`
+- Desktop App: Opens automatically
+
+---
+
+### 🚀 Production Deployment (VPS - Digital Ocean Ubuntu)
+
+Use this configuration when deploying to a production VPS (Digital Ocean, AWS, etc.).
+
+**⚠️ Important**: Before deploying, ensure:
+1. DNS records are configured (see [DOMAIN_SETUP.md](./DOMAIN_SETUP.md))
+2. SSL certificates are obtained
+3. Nginx is configured as reverse proxy
+
+#### Backend `.env` (Production)
+
+Create `/root/graohen_os/backend/py-service/.env`:
+
+```bash
+# Application
+APP_NAME=GrapheneOS Installer API
+APP_VERSION=1.0.0
+DEBUG=False
+ENVIRONMENT=production
+
+# Server (listen on all interfaces, but Nginx proxies)
+PY_HOST=0.0.0.0
+PY_PORT=17890
+
+# API Configuration
+API_V1_PREFIX=/api/v1
+ALLOWED_HOSTS=os.fxmail.ai,drive.fxmail.ai,fxmail.ai,localhost,127.0.0.1
+
+# CORS Configuration (PRODUCTION - use your actual domains)
+CORS_ORIGINS=https://os.fxmail.ai,https://drive.fxmail.ai,https://fxmail.ai
+
+# ADB and Fastboot Paths (VPS - absolute paths)
+ADB_PATH=/usr/local/bin/adb
+FASTBOOT_PATH=/usr/local/bin/fastboot
+
+# Bundle Storage (VPS - absolute path)
+GRAPHENE_BUNDLE_PATH=/root/graohen_os/bundles
+
+# APK Storage (VPS - absolute path)
+APK_STORAGE_DIR=/root/graohen_os/apks
+
+# Email Domain Configuration (PRODUCTION)
+EMAIL_DOMAIN=fxmail.ai
+EXTERNAL_HTTPS_BASE_URL=https://fxmail.ai
+
+# Security (CHANGE THIS IN PRODUCTION!)
+SECRET_KEY=GENERATE_A_LONG_RANDOM_STRING_HERE_USE_OPENSSL_OR_PYTHON_SECRETS
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+LOG_DIR=/root/graohen_os/backend/py-service/logs
+```
+
+#### Frontend `.env` Files (Production)
+
+**Desktop App** (`frontend/packages/desktop/.env`):
+```bash
+# PRODUCTION - Use domain
+VITE_API_BASE_URL=https://os.fxmail.ai
+```
+
+**Web App** (`frontend/packages/web/.env`):
+```bash
+# PRODUCTION - Use domain
+VITE_API_BASE_URL=https://os.fxmail.ai
+```
+
+**Web Flasher** (`frontend/apps/web-flasher/.env`):
+```bash
+# PRODUCTION - Use domain
+VITE_API_BASE_URL=https://os.fxmail.ai
+```
+
+#### Key Differences: Local vs Production
+
+| Configuration | Local Development | Production (VPS) |
+|--------------|-------------------|------------------|
+| **Backend Host** | `127.0.0.1` | `0.0.0.0` |
+| **CORS_ORIGINS** | `http://localhost:5173` | `https://os.fxmail.ai` |
+| **ALLOWED_HOSTS** | `localhost,127.0.0.1` | `os.fxmail.ai,drive.fxmail.ai,fxmail.ai` |
+| **DEBUG** | `True` | `False` |
+| **VITE_API_BASE_URL** | `http://127.0.0.1:17890` | `https://os.fxmail.ai` |
+| **BUNDLE_PATH** | `~/bundles` | `/root/graohen_os/bundles` |
+| **APK_STORAGE_DIR** | `~/apks` | `/root/graohen_os/apks` |
+| **Nginx** | Not required | Required (reverse proxy) |
+| **SSL** | Not required | Required (Let's Encrypt) |
+
+#### Production Deployment Steps
+
+1. **Setup VPS** (see [Deployment](#deployment) section)
+2. **Configure DNS** (see [DOMAIN_SETUP.md](./DOMAIN_SETUP.md))
+3. **Setup SSL Certificates** (see [DOMAIN_SETUP.md](./DOMAIN_SETUP.md))
+4. **Configure Nginx** (see [DOMAIN_SETUP.md](./DOMAIN_SETUP.md))
+5. **Update `.env` files** with production values
+6. **Start Backend Service**:
+   ```bash
+   sudo systemctl start graphene-flasher
+   sudo systemctl enable graphene-flasher
+   ```
+7. **Verify Deployment**:
+   ```bash
+   curl https://os.fxmail.ai/health
+   ```
+
+For detailed domain configuration instructions, see **[DOMAIN_SETUP.md](./DOMAIN_SETUP.md)**.
+
+---
+
 ## Setup Instructions
 
 ### Backend Setup
@@ -342,9 +553,18 @@ pnpm --filter ui build
 
 ## Configuration
 
+### Environment Variables Overview
+
+The project uses `.env` files for configuration. The main differences between local and production are:
+
+- **Local**: Uses `localhost` and `127.0.0.1` for all services
+- **Production**: Uses actual domains (`os.fxmail.ai`, `drive.fxmail.ai`, `fxmail.ai`) with HTTPS
+
+See the [Local Development vs Production Deployment](#local-development-vs-production-deployment) section above for complete configuration examples.
+
 ### Backend Configuration (`.env`)
 
-Create `backend/py-service/.env`:
+**For Local Development** - Create `backend/py-service/.env`:
 
 ```bash
 # Application
@@ -398,17 +618,19 @@ LOG_DIR=./logs
 SUPPORTED_CODENAMES=cheetah,panther,raven,oriole,husky,shiba,akita,felix,tangorpro,lynx,bluejay,barbet,redfin
 ```
 
+**For Production (VPS)** - Use the production configuration shown in the [Local Development vs Production Deployment](#local-development-vs-production-deployment) section above.
+
 ### Frontend Configuration
 
-**Desktop App** (`frontend/packages/desktop/.env`):
-```bash
-VITE_API_BASE_URL=https://os.fxmail.ai
-```
+**Local Development:**
+- **Desktop App** (`frontend/packages/desktop/.env`): `VITE_API_BASE_URL=http://127.0.0.1:17890`
+- **Web App** (`frontend/packages/web/.env`): `VITE_API_BASE_URL=http://127.0.0.1:17890`
+- **Web Flasher** (`frontend/apps/web-flasher/.env`): `VITE_API_BASE_URL=http://127.0.0.1:17890`
 
-**Web App** (`frontend/packages/web/.env`):
-```bash
-VITE_API_BASE_URL=https://os.fxmail.ai
-```
+**Production (VPS):**
+- **Desktop App** (`frontend/packages/desktop/.env`): `VITE_API_BASE_URL=https://os.fxmail.ai`
+- **Web App** (`frontend/packages/web/.env`): `VITE_API_BASE_URL=https://os.fxmail.ai`
+- **Web Flasher** (`frontend/apps/web-flasher/.env`): `VITE_API_BASE_URL=https://os.fxmail.ai`
 
 ---
 
@@ -516,6 +738,8 @@ pnpm --filter web build
 
 ### Building for Production
 
+#### Local Build
+
 ```bash
 # Build all frontend packages
 cd frontend
@@ -525,6 +749,111 @@ pnpm build
 # - Desktop: frontend/packages/desktop/out/
 # - Web: frontend/packages/web/dist/
 ```
+
+#### VPS Build (for Production Deployment)
+
+On your VPS, build the frontend applications:
+
+```bash
+# SSH into your VPS
+ssh root@YOUR_VPS_IP
+
+# Navigate to project
+cd /root/graohen_os/frontend
+
+# Install dependencies (if not already installed)
+pnpm install
+
+# Build all packages
+pnpm build
+
+# Build outputs:
+# - Desktop Electron: frontend/packages/desktop/out/
+# - Web App: frontend/packages/web/dist/
+# - Web Flasher: frontend/apps/web-flasher/dist/
+```
+
+**Make built files downloadable:**
+
+1. **Serve built web-flasher under `/flash` path via Nginx:**
+
+Edit Nginx configuration (`/etc/nginx/sites-available/os.fxmail.ai`):
+
+```nginx
+# Add after main location block
+location /flash {
+    alias /root/graohen_os/frontend/apps/web-flasher/dist;
+    try_files $uri $uri/ /flash/index.html;
+    
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+```
+
+2. **Make Electron builds downloadable:**
+
+Create a downloads directory and symlink built Electron apps:
+
+```bash
+# Create downloads directory
+mkdir -p /var/www/flashdash/downloads
+
+# After building Electron app:
+# macOS
+cp /root/graohen_os/frontend/packages/desktop/out/*.dmg /var/www/flashdash/downloads/flashdash-mac.dmg
+
+# Windows
+cp /root/graohen_os/frontend/packages/desktop/out/*.exe /var/www/flashdash/downloads/flashdash-windows.exe
+
+# Linux
+cp /root/graohen_os/frontend/packages/desktop/out/*.AppImage /var/www/flashdash/downloads/flashdash-linux.AppImage
+
+# Set permissions
+chmod 644 /var/www/flashdash/downloads/*
+```
+
+Add Nginx location for downloads:
+
+```nginx
+location /downloads {
+    alias /var/www/flashdash/downloads;
+    add_header Content-Disposition "attachment";
+}
+```
+
+3. **Update frontend environment variables:**
+
+The "Flash Online" button in the web app should point to your VPS:
+
+In `frontend/packages/web/.env`:
+```bash
+VITE_WEB_FLASHER_URL=https://os.fxmail.ai/flash
+VITE_DESKTOP_DOWNLOAD_WIN=https://os.fxmail.ai/downloads/flashdash-windows.exe
+VITE_DESKTOP_DOWNLOAD_MAC=https://os.fxmail.ai/downloads/flashdash-mac.dmg
+VITE_DESKTOP_DOWNLOAD_LINUX=https://os.fxmail.ai/downloads/flashdash-linux.AppImage
+```
+
+**Rebuild web app after updating `.env`:**
+
+```bash
+cd /root/graohen_os/frontend
+pnpm --filter web build
+```
+
+**Reload Nginx:**
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+**Access Points After Deployment:**
+
+- Main Web App: `https://os.fxmail.ai`
+- Flash Online (Browser): `https://os.fxmail.ai/flash`
+- Desktop Downloads: `https://os.fxmail.ai/downloads/`
 
 ---
 
@@ -672,6 +1001,11 @@ The backend automatically identifies devices by:
 
 ## Deployment
 
+> **📚 For complete VPS deployment instructions, see [DEPLOYMENT_VPS.md](./DEPLOYMENT_VPS.md)**  
+> **📚 For domain setup instructions (DNS, SSL, Nginx), see [DOMAIN_SETUP.md](./DOMAIN_SETUP.md)**
+
+This section provides a quick overview. For detailed step-by-step VPS deployment instructions including build management, see the **[DEPLOYMENT_VPS.md](./DEPLOYMENT_VPS.md)** guide. For domain configuration (DNS, SSL certificates, Nginx), refer to the **[DOMAIN_SETUP.md](./DOMAIN_SETUP.md)** guide.
+
 ### VPS Deployment (Digital Ocean, AWS, etc.)
 
 #### 1. Server Setup
@@ -712,27 +1046,27 @@ mkdir -p /root/graohen_os/apks
 mkdir -p /root/graohen_os/backend/py-service/logs
 ```
 
-#### 3. DNS Configuration
+#### 3. DNS & SSL Certificate Setup
 
-Configure DNS records in your DNS provider:
+**📚 See [DOMAIN_SETUP.md](./DOMAIN_SETUP.md) for detailed DNS and SSL certificate configuration.**
 
-**os.fxmail.ai (Main API):**
-```
-Type: A
-Name: os
-Value: YOUR_VPS_IP
-TTL: 3600
-```
+Quick reference:
 
-**drive.fxmail.ai (Encrypted Drive):**
-```
-Type: A
-Name: drive
-Value: YOUR_VPS_IP
-TTL: 3600
-```
+1. **Configure DNS A Records**:
+   - `os.fxmail.ai` → Your VPS IP
+   - `drive.fxmail.ai` → Your VPS IP
+   - `fxmail.ai` → Your VPS IP
 
-#### 4. SSL Certificate Setup
+2. **Obtain SSL Certificates**:
+   ```bash
+   certbot certonly --standalone -d os.fxmail.ai
+   certbot certonly --standalone -d drive.fxmail.ai
+   certbot certonly --standalone -d fxmail.ai
+   ```
+
+For complete step-by-step instructions, see **[DOMAIN_SETUP.md](./DOMAIN_SETUP.md)**.
+
+#### 4. Nginx Configuration
 
 ```bash
 # Install Certbot
@@ -773,7 +1107,32 @@ server {
     
     client_max_body_size 100M;
     
+    # Serve web-flasher under /flash path (built static files)
+    location /flash {
+        alias /root/graohen_os/frontend/apps/web-flasher/dist;
+        try_files $uri $uri/ /flash/index.html;
+        
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+    
+    # Serve web app under root
     location / {
+        alias /root/graohen_os/frontend/packages/web/dist;
+        try_files $uri $uri/ /index.html;
+        
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+    
+    # Backend API routes - proxy to FastAPI backend
+    location ~ ^/(health|devices|bundles|apks|tools|flash/jobs) {
         proxy_pass http://127.0.0.1:17890;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -786,6 +1145,13 @@ server {
         proxy_connect_timeout 300s;
         proxy_send_timeout 300s;
         proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+    
+    # Downloads directory for Electron builds
+    location /downloads {
+        alias /var/www/flashdash/downloads;
+        add_header Content-Disposition "attachment";
     }
 }
 EOF
@@ -795,6 +1161,8 @@ ln -sf /etc/nginx/sites-available/os.fxmail.ai /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 ```
+
+**Note**: For complete Nginx configurations for all domains (`os.fxmail.ai`, `drive.fxmail.ai`, `fxmail.ai`), see **[DOMAIN_SETUP.md](./DOMAIN_SETUP.md)**.
 
 #### 6. Firewall Setup
 
@@ -814,9 +1182,34 @@ ufw enable
 ufw status verbose
 ```
 
-#### 7. Systemd Service
+#### 7. Update `.env` Files
+
+Use the **Production** configuration from the [Local Development vs Production Deployment](#local-development-vs-production-deployment) section above.
+
+**Key changes for production:**
+- `CORS_ORIGINS`: Use your actual domains (`https://os.fxmail.ai`, etc.)
+- `ALLOWED_HOSTS`: Include your domains
+- `VITE_API_BASE_URL`: Use HTTPS domain (`https://os.fxmail.ai`)
+
+#### 8. Systemd Service
 
 Create service file (see [Running the Project](#running-the-project) section).
+
+#### 9. Verify Deployment
+
+Test all endpoints:
+```bash
+# Health check
+curl https://os.fxmail.ai/health
+
+# Test API
+curl https://os.fxmail.ai/devices
+
+# Check SSL
+curl -I https://os.fxmail.ai
+```
+
+For complete verification steps, see **[DOMAIN_SETUP.md](./DOMAIN_SETUP.md)** → [Verification & Testing](./DOMAIN_SETUP.md#verification--testing).
 
 ### Desktop Electron App Distribution
 
@@ -1247,6 +1640,28 @@ For testing/development, use purchase number: `100016754321`
 - Only Pixel devices supported (verified via codename)
 - Bundles must exist locally (no runtime downloads)
 - Real-time progress via SSE log streaming
+
+---
+
+## Domain Setup
+
+For complete instructions on configuring domains (os.fxmail.ai, drive.fxmail.ai, fxmail.ai), DNS records, SSL certificates, and Nginx reverse proxy, see:
+
+### **[DOMAIN_SETUP.md](./DOMAIN_SETUP.md)**
+
+This guide covers:
+- ✅ DNS configuration (A records)
+- ✅ SSL certificate setup (Let's Encrypt)
+- ✅ Nginx reverse proxy configuration for all three domains
+- ✅ Backend and frontend `.env` configuration (production)
+- ✅ Verification and testing endpoints
+- ✅ Troubleshooting common domain/SSL issues
+
+**Quick Links:**
+- [DNS Configuration](./DOMAIN_SETUP.md#dns-configuration)
+- [SSL Certificate Setup](./DOMAIN_SETUP.md#ssl-certificate-setup)
+- [Nginx Configuration](./DOMAIN_SETUP.md#nginx-configuration)
+- [Verification & Testing](./DOMAIN_SETUP.md#verification--testing)
 
 ---
 

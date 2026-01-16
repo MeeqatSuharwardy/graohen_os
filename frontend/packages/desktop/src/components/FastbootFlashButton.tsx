@@ -50,7 +50,7 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
     }
   }, [logs]);
 
-  // Poll device connection status while flashing
+  // Poll device connection status while flashing - but don't let disconnection stop the process
   useEffect(() => {
     if (!processing || !open) return;
 
@@ -59,19 +59,43 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
         const response = await apiClient.get('/devices/');
         const devices: Device[] = response.data || [];
         const deviceSerial = device.serial || device.id;
+        
+        // Look for device in any state during flashing (fastboot, device, or even if it temporarily disconnects)
         const foundDevice = devices.find(d => 
-          (d.serial === deviceSerial || d.id === deviceSerial) && 
-          (d.state === 'fastboot' || d.state === 'device')
+          d.serial === deviceSerial || d.id === deviceSerial
         );
-        setDeviceConnected(!!foundDevice);
+        
+        if (foundDevice) {
+          // Device found - update connection status
+          const isConnected = foundDevice.state === 'fastboot' || foundDevice.state === 'device';
+          const wasConnected = deviceConnected;
+          setDeviceConnected(isConnected);
+          
+          // Log reconnection if device was disconnected and is now back
+          if (!wasConnected && isConnected) {
+            setLogs(prev => [...prev, `✓ Device reconnected (state: ${foundDevice.state})`]);
+          }
+        } else {
+          // Device not found - might be temporarily disconnected during fastboot operations
+          // Update connection status to show "Disconnected" in UI
+          const wasConnected = deviceConnected;
+          setDeviceConnected(false);
+          
+          // Log disconnect only once when it first happens
+          if (wasConnected) {
+            setLogs(prev => [...prev, `⚠ Device disconnected (common during fastboot operations - it will reconnect)`]);
+          }
+          // Don't interrupt flash process - device will reconnect during flash operations
+        }
       } catch (err) {
-        // If we can't check devices, assume disconnected
-        setDeviceConnected(false);
+        // Don't assume disconnected on error - network issues might be temporary
+        // Only log if this is a persistent issue
+        console.warn('Could not check device status:', err);
       }
-    }, 2000); // Check every 2 seconds
+    }, 3000); // Check every 3 seconds (reduced frequency to avoid too many requests)
 
     return () => clearInterval(devicePollInterval);
-  }, [processing, open, device.serial, device.id]);
+  }, [processing, open, device.serial, device.id, deviceConnected]);
 
   // Check if bundle is available
   const checkBundleAvailability = async (): Promise<boolean> => {
@@ -241,10 +265,23 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
           }
           if (data.status) {
             setStatus(data.status);
-            if (data.status === 'completed' || data.status === 'failed') {
+            if (data.status === 'completed') {
               setProcessing(false);
-              // Don't close dialog - let user close manually
+              setCurrentStep('Flash completed successfully');
+              setProgress(100);
+              setLogs(prev => [...prev, '✅ Flash process completed successfully!']);
+              // Keep dialog open - let user close manually
               if (eventSource) eventSource.close();
+            } else if (data.status === 'failed' || data.status === 'cancelled') {
+              setProcessing(false);
+              setCurrentStep('Flash failed');
+              // Keep dialog open - let user close manually to see all logs
+              if (eventSource) eventSource.close();
+            } else if (data.status === 'running') {
+              // Update progress if available
+              if (data.progress !== undefined) {
+                setProgress(data.progress);
+              }
             }
           }
         } catch (e) {
@@ -281,12 +318,16 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
         if (job.status === 'completed') {
           setStatus('completed');
           setProcessing(false);
-          // Don't close dialog - let user close manually
+          setCurrentStep('Flash completed successfully');
+          setProgress(100);
+          setLogs(prev => [...prev, '✅ Flash process completed successfully!']);
+          // Keep dialog open - let user close manually
           if (eventSource) eventSource.close();
           clearInterval(pollInterval);
         } else if (job.status === 'failed' || job.status === 'cancelled') {
           setStatus('failed');
           setProcessing(false);
+          setCurrentStep('Flash failed');
           if (job.logs && job.logs.length > 0) {
             const errorLogs = job.logs.filter((log: string) => 
               log.includes('ERROR') || log.includes('error') || log.includes('failed') || log.includes('Failed')
@@ -294,10 +335,18 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
             if (errorLogs.length > 0) {
               setError(errorLogs[errorLogs.length - 1]);
             }
+            // Add all logs including errors
+            setLogs(job.logs);
           }
-          // Don't close dialog - let user close manually
+          // Keep dialog open - let user close manually to see all logs
           if (eventSource) eventSource.close();
           clearInterval(pollInterval);
+        } else if (job.status === 'running') {
+          // Update progress if available
+          if (job.progress !== undefined) {
+            setProgress(job.progress);
+          }
+          // Keep processing state and continue logging
         }
       } catch (err: any) {
         // Don't log timeout errors as errors - they're expected during long operations
@@ -441,7 +490,13 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
 
     setProcessing(true);
     setError(null);
-    setLogs(['Checking for bundle availability...']);
+    
+    // Add initial log with device state warning if needed
+    const initialLogs = ['Checking for bundle availability...'];
+    if (device.state !== 'fastboot') {
+      initialLogs.push(`⚠ Warning: Device state is "${device.state}" (expected "fastboot"). Attempting flash anyway...`);
+    }
+    setLogs(initialLogs);
     setStatus('starting');
     setJobId(null);
     setProgress(0);
@@ -493,11 +548,15 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
   };
 
   const handleOpenChange = (newOpen: boolean) => {
-    // Allow closing even when processing - user can manually close
+    // CRITICAL: Always allow user to manually close the dialog
+    // But NEVER close automatically - user must explicitly close even during device disconnects
     setOpen(newOpen);
+    
+    // Only reset state when user explicitly closes AND process is complete/failed
+    // If process is still running or device disconnected, keep the dialog open to show continuous logs
     if (!newOpen) {
-      // Reset state when dialog closes (only if not processing)
-      if (!processing) {
+      // Only reset if not actively processing AND not downloading AND status is not running
+      if (!processing && !downloading && status !== 'running' && status !== 'starting') {
         setError(null);
         setLogs([]);
         setStatus(null);
@@ -505,8 +564,17 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
         setProgress(0);
         setCurrentStep('');
         setDeviceConnected(true);
+        setDownloading(false);
+        setDownloadProgress(0);
+      } else if (processing || downloading || status === 'running') {
+        // If still processing/downloading, log but allow close
+        // Don't reset state - user can reopen to see logs
+        // The flash will continue in the background
+        console.log('Flash is still in progress, but dialog closed by user');
+        setLogs(prev => [...prev, '⚠ Dialog closed by user, but flash process continues in background']);
       }
     }
+    // If opening, don't do anything - let the dialog stay open
   };
 
   return (
@@ -550,21 +618,23 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
                   {device.codename && <span className="ml-2">({device.codename})</span>}
                 </span>
               </div>
-              {processing && (
-                <div className="flex items-center gap-2">
-                  {deviceConnected ? (
-                    <>
-                      <Wifi className="w-4 h-4 text-green-600 dark:text-green-400" />
-                      <span className="text-xs text-muted-foreground">Connected</span>
-                    </>
-                  ) : (
-                    <>
-                      <WifiOff className="w-4 h-4 text-yellow-600 dark:text-yellow-400 animate-pulse" />
-                      <span className="text-xs text-muted-foreground">Reconnecting...</span>
-                    </>
-                  )}
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {deviceConnected ? (
+                  <>
+                    <Wifi className="w-4 h-4 text-green-600 dark:text-green-400" />
+                    <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                      Device: {device.deviceName || 'Pixel 7'} ({device.codename || 'panther'}) Connected
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="w-4 h-4 text-yellow-600 dark:text-yellow-400 animate-pulse" />
+                    <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
+                      Device: {device.deviceName || 'Pixel 7'} ({device.codename || 'panther'}) Disconnected
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -666,14 +736,23 @@ export function FastbootFlashButton({ device, trigger }: FastbootFlashButtonProp
             <Button
               variant="outline"
               onClick={() => handleOpenChange(false)}
-              disabled={downloading}
+              // Always allow closing - user can manually close to see logs later
             >
-              {downloading ? 'Downloading...' : processing ? 'Close (Flash will continue)' : 'Close'}
+              {downloading 
+                ? 'Downloading... (Flash will continue)' 
+                : processing 
+                ? 'Close Dialog (Logs preserved)' 
+                : 'Close'}
             </Button>
-            {!processing && !downloading && status !== 'completed' && (
+            {!processing && !downloading && status !== 'completed' && status !== 'failed' && (
               <Button onClick={handleFlash}>
                 <Zap className="w-4 h-4 mr-2" />
                 Start Flash
+              </Button>
+            )}
+            {(status === 'completed' || status === 'failed') && (
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>
+                Done
               </Button>
             )}
           </div>

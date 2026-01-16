@@ -5,7 +5,7 @@ import { Button } from '@flashdash/ui';
 import { Badge } from '@flashdash/ui';
 import { Alert, AlertDescription, AlertTitle } from '@flashdash/ui';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@flashdash/ui';
-import { Activity, Smartphone, AlertTriangle, Download, Monitor } from 'lucide-react';
+import { Activity, Smartphone, AlertTriangle, Download, Monitor, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../lib/api';
 
@@ -104,9 +104,26 @@ export function Dashboard() {
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
+        className="flex items-center justify-between mb-6"
       >
-        <h1 className="text-4xl font-bold mb-2">Flash Dashboard</h1>
-        <p className="text-muted-foreground">Web dashboard (read-only). Use desktop app for flashing.</p>
+        <div>
+          <h1 className="text-4xl font-bold mb-2">Flash Dashboard</h1>
+          <p className="text-muted-foreground">Web dashboard (read-only). Use desktop app or browser for flashing.</p>
+        </div>
+        <Button
+          size="lg"
+          onClick={() => {
+            const webFlasherUrl = import.meta.env.VITE_WEB_FLASHER_URL || 
+              (process.env.NODE_ENV === 'production' 
+                ? `${window.location.origin}/flash` 
+                : 'http://localhost:5175');
+            window.open(webFlasherUrl, '_blank');
+          }}
+          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+        >
+          <Globe className="w-5 h-5 mr-2" />
+          Flash Online (Browser)
+        </Button>
       </motion.div>
 
       {error && (

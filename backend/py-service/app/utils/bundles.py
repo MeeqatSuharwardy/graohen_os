@@ -9,62 +9,161 @@ from datetime import datetime, timedelta
 from ..config import settings
 
 
+def _find_project_root() -> Path:
+    """Find the project root directory (where bundles/ folder is located)"""
+    # Try multiple methods to find project root
+    try:
+        # Method 1: From __file__ (when running as module)
+        current_file = Path(__file__).resolve()
+        # app/utils/bundles.py -> go up 4 levels
+        project_root = current_file.parent.parent.parent.parent
+        if (project_root / "bundles").exists():
+            return project_root
+    except:
+        pass
+    
+    # Method 2: From current working directory
+    try:
+        cwd = Path.cwd().resolve()
+        # If we're in backend/py-service, go up 2 levels
+        if 'backend' in str(cwd) and 'py-service' in str(cwd):
+            project_root = cwd.parent.parent
+            if (project_root / "bundles").exists():
+                return project_root
+        # If we're in backend, go up 1 level
+        elif 'backend' in str(cwd):
+            project_root = cwd.parent
+            if (project_root / "bundles").exists():
+                return project_root
+        # Try current directory
+        if (cwd / "bundles").exists():
+            return cwd
+    except:
+        pass
+    
+    # Method 3: Try common locations relative to current file
+    try:
+        current_file = Path(__file__).resolve()
+        # Try going up from app/utils/bundles.py
+        for levels in [3, 4, 5]:
+            candidate = current_file
+            for _ in range(levels):
+                candidate = candidate.parent
+            if (candidate / "bundles").exists():
+                return candidate
+    except:
+        pass
+    
+    # Fallback: return a default (will be checked later)
+    return Path.cwd()
+
+
 def index_bundles() -> Dict[str, List[Dict[str, Any]]]:
-    """Index all available bundles"""
-    bundles_root = Path(settings.GRAPHENE_BUNDLES_ROOT)
-    if not bundles_root.exists():
+    """Index all available bundles - checks multiple possible locations"""
+    # Try multiple possible root locations for bundles
+    bundles_root = None
+    possible_roots = []
+    
+    # 1. From config (expanded user path)
+    bundles_root_str = os.path.expanduser(str(settings.GRAPHENE_BUNDLES_ROOT))
+    possible_roots.append(Path(bundles_root_str).resolve())
+    
+    # 2. Relative to project root (where bundles/ folder is located)
+    project_root = _find_project_root()
+    possible_roots.append(project_root / "bundles")
+    
+    # 3. Relative path from config (if it's a relative path)
+    if not os.path.isabs(bundles_root_str):
+        possible_roots.append(project_root / bundles_root_str.lstrip('/'))
+    
+    # Find the first existing root
+    for root in possible_roots:
+        if root.exists() and root.is_dir():
+            bundles_root = root
+            break
+    
+    if not bundles_root:
         return {}
     
     bundles = {}
     
-    for codename_dir in bundles_root.iterdir():
-        if not codename_dir.is_dir():
-            continue
-        
-        codename = codename_dir.name
-        if codename not in settings.supported_codenames_list:
-            continue
-        
-        versions = []
-        for version_dir in codename_dir.iterdir():
-            if not version_dir.is_dir():
+    try:
+        for codename_dir in bundles_root.iterdir():
+            if not codename_dir.is_dir():
                 continue
             
-            version = version_dir.name
-            bundle_info = get_bundle_info(codename, version, version_dir)
-            if bundle_info:
-                versions.append(bundle_info)
-        
-        # Sort versions (newest first)
-        versions.sort(key=lambda x: x.get("version", ""), reverse=True)
-        bundles[codename] = versions
+            codename = codename_dir.name
+            # Skip hidden directories
+            if codename.startswith('.'):
+                continue
+            
+            # Check if codename is in supported list (if list exists and is not empty)
+            # If list is empty or not defined, allow all codenames
+            if hasattr(settings, 'supported_codenames_list') and settings.supported_codenames_list:
+                if codename not in settings.supported_codenames_list:
+                    continue
+            
+            versions = []
+            try:
+                for version_dir in codename_dir.iterdir():
+                    if not version_dir.is_dir():
+                        continue
+                    
+                    # Skip hidden directories
+                    if version_dir.name.startswith('.'):
+                        continue
+                    
+                    # Version is the directory name (e.g., "2025122500")
+                    version = version_dir.name
+                    bundle_info = get_bundle_info(codename, version, version_dir)
+                    if bundle_info:
+                        versions.append(bundle_info)
+            except (PermissionError, OSError) as e:
+                # Skip directories we can't access
+                continue
+            
+            if versions:
+                # Sort versions (newest first) - versions are typically YYYYMMDDXX format
+                versions.sort(key=lambda x: x.get("version", ""), reverse=True)
+                bundles[codename] = versions
+    except (PermissionError, OSError) as e:
+        # If we can't access the bundles directory, return empty dict
+        pass
     
     return bundles
 
 
 def get_bundle_info(codename: str, version: str, bundle_path: Path) -> Optional[Dict[str, Any]]:
     """Get bundle information from metadata.json or infer from files"""
+    # Ensure bundle_path is resolved (absolute path)
+    bundle_path = bundle_path.resolve()
+    
     metadata_path = bundle_path / "metadata.json"
     
+    # Try reading metadata.json first
     if metadata_path.exists():
         try:
             with open(metadata_path, "r") as f:
                 metadata = json.load(f)
-                # Verify files exist
+                # Verify files exist - check for image.zip or image.zip in metadata
                 files = metadata.get("files", {})
-                image_zip = bundle_path / files.get("imageZip", "image.zip")
+                image_zip_name = files.get("imageZip", "image.zip")
+                image_zip = bundle_path / image_zip_name
+                
                 if image_zip.exists():
                     return {
                         "codename": codename,
                         "version": version,
                         "deviceName": metadata.get("deviceName", codename),
                         "path": str(bundle_path),
+                        "downloadUrl": f"https://releases.grapheneos.org/{codename}-factory-{version}.zip",
                         "metadata": metadata,
                     }
-        except Exception:
+        except Exception as e:
+            # If metadata.json is invalid, fall through to file-based detection
             pass
     
-    # Infer from files
+    # Infer from files - check for image.zip
     image_zip = bundle_path / "image.zip"
     if image_zip.exists():
         return {
@@ -72,6 +171,7 @@ def get_bundle_info(codename: str, version: str, bundle_path: Path) -> Optional[
             "version": version,
             "deviceName": codename,
             "path": str(bundle_path),
+            "downloadUrl": f"https://releases.grapheneos.org/{codename}-factory-{version}.zip",
             "metadata": {
                 "codename": codename,
                 "version": version,
@@ -89,11 +189,58 @@ def get_bundle_info(codename: str, version: str, bundle_path: Path) -> Optional[
 
 
 def get_bundle_for_codename(codename: str) -> Optional[Dict[str, Any]]:
-    """Get the newest bundle for a codename"""
+    """Get the newest bundle for a codename - searches multiple locations"""
+    # First try indexing
     bundles = index_bundles()
     codename_bundles = bundles.get(codename, [])
+    
     if codename_bundles:
-        return codename_bundles[0]  # Already sorted newest first
+        # Return the newest bundle (first in sorted list)
+        return codename_bundles[0]
+    
+    # If not found via indexing, try direct directory scan
+    # Check multiple possible locations for bundles
+    possible_roots = []
+    
+    # 1. From config (expanded user path)
+    bundles_root_str = os.path.expanduser(str(settings.GRAPHENE_BUNDLES_ROOT))
+    possible_roots.append(Path(bundles_root_str).resolve())
+    
+    # 2. Relative to project root (where bundles/ folder is located)
+    project_root = _find_project_root()
+    possible_roots.append(project_root / "bundles")
+    
+    # 3. Relative path from config (if it's a relative path)
+    if not os.path.isabs(bundles_root_str):
+        possible_roots.append(project_root / bundles_root_str.lstrip('/'))
+    
+    # Try each possible root location
+    for bundles_root in possible_roots:
+        if not bundles_root.exists():
+            continue
+        
+        codename_dir = bundles_root / codename
+        if codename_dir.exists() and codename_dir.is_dir():
+            versions = []
+            try:
+                for version_dir in codename_dir.iterdir():
+                    if not version_dir.is_dir() or version_dir.name.startswith('.'):
+                        continue
+                    
+                    # Version is the directory name (e.g., "2025122500")
+                    version = version_dir.name
+                    bundle_info = get_bundle_info(codename, version, version_dir)
+                    if bundle_info:
+                        versions.append(bundle_info)
+                
+                if versions:
+                    # Sort versions (newest first) - versions are typically YYYYMMDDXX format
+                    versions.sort(key=lambda x: x.get("version", ""), reverse=True)
+                    return versions[0]
+            except (PermissionError, OSError) as e:
+                # Continue to next possible root
+                continue
+    
     return None
 
 

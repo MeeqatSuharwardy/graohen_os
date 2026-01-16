@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@flashdash/ui';
 import { Card, CardContent } from '@flashdash/ui';
 import { Badge } from '@flashdash/ui';
-import { Download, Smartphone, Shield, Zap, ArrowRight, Monitor } from 'lucide-react';
+import { Download, Smartphone, Shield, Zap, ArrowRight, Monitor, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 function detectOS(): 'windows' | 'mac' | 'linux' | 'unknown' {
@@ -124,6 +124,39 @@ export function Landing() {
             >
               <Monitor className="w-5 h-5 mr-2" />
               Open Desktop App
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+
+            <Button
+              size="lg"
+              variant="default"
+              onClick={() => {
+                // Always use /flash route (works in both dev and prod)
+                // In development, this requires the web-flasher to be running on port 5175
+                // or the main web server to proxy /flash to the web-flasher dev server
+                const webFlasherUrl = import.meta.env.VITE_WEB_FLASHER_URL || `${window.location.origin}/flash`;
+                
+                // In development, try to check if web-flasher is available
+                if (import.meta.env.DEV && !import.meta.env.VITE_WEB_FLASHER_URL) {
+                  // Check if web-flasher dev server is running
+                  fetch('http://localhost:5175', { method: 'HEAD', mode: 'no-cors' })
+                    .then(() => {
+                      // Dev server is running, use it
+                      window.open('http://localhost:5175', '_blank');
+                    })
+                    .catch(() => {
+                      // Dev server not running, show alert
+                      alert('Web Flasher dev server is not running.\n\nTo run it:\ncd frontend && pnpm dev:web-flasher\n\nOr use the production build at /flash');
+                      window.open(webFlasherUrl, '_blank');
+                    });
+                } else {
+                  window.open(webFlasherUrl, '_blank');
+                }
+              }}
+              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            >
+              <Globe className="w-5 h-5 mr-2" />
+              Flash Online (Browser)
               <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </motion.div>

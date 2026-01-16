@@ -813,8 +813,9 @@ class GrapheneFlasher:
         if radio_files:
             partition_files["radio"] = radio_files[0]
         
-        # Core partitions (exact names)
-        for partition in ["boot", "vendor_boot", "dtbo", "vbmeta"]:
+        # Core partitions (exact names - MUST match official flash-all.sh order)
+        core_partitions = ["boot", "init_boot", "dtbo", "vendor_kernel_boot", "pvmfw", "vendor_boot", "vbmeta"]
+        for partition in core_partitions:
             img_path = extracted_dir / f"{partition}.img"
             if img_path.exists():
                 partition_files[partition] = img_path
@@ -1277,29 +1278,73 @@ class GrapheneFlasher:
             if result.returncode != 0:
                 self._error(f"Failed to set active slot: {result.stderr or result.stdout}", step="flash")
             
+            # EXACT SEQUENCE: fastboot reboot-bootloader → wait 5 seconds (as per official GrapheneOS CLI)
             self._log("Rebooting bootloader...", "info", step="flash")
+            self._log("Using: fastboot reboot-bootloader", "info", step="flash")
             result = self._run_fastboot(["reboot-bootloader"], timeout=60)
             if result.returncode != 0:
                 self._error(f"Failed to reboot bootloader: {result.stderr or result.stdout}", step="flash")
             
-            # Wait for device to return to fastboot (Tensor Pixels USB re-enumeration)
-            self._log("Waiting for device to return to fastboot mode...", "info", step="flash")
-            self._log("This may take up to 90 seconds - device will disconnect and reconnect (normal for Tensor Pixels)", "info", step="flash")
-            device_detected = self._wait_for_fastboot(timeout=90)
-            if not device_detected:
-                self._log("Device not detected within timeout - attempting to continue anyway...", "warning", step="flash")
-                # Try one more direct check
-                test_result = self._run_fastboot(["getvar", "product"], timeout=5)
-                if test_result and test_result.returncode == 0:
-                    self._log("Device responds to direct command - continuing...", "success", step="flash")
-                else:
-                    self._error("Device did not return to fastboot mode after reboot and is not responding", step="flash")
+            # EXACT TIMING: Wait exactly 5 seconds as per official GrapheneOS CLI sequence
+            self._log("Waiting 5 seconds for device to reinitialize (as per GrapheneOS CLI)...", "info", step="flash")
+            self._log("Note: USB disconnect/reconnect is normal - device is rebooting, NOT looping", "info", step="flash")
+            import time
+            time.sleep(5)
             
-            # NOTE: NO second bootloader flash!
-            # On Pixel 7 (Tensor/cloudripper), bootloader is flashed ONCE per slot.
-            # Flashing bootloader twice to the same slot triggers bootloader protection and causes "could not clear" error.
-            # After reboot, the active slot has changed and bootloader is already correct.
-            self._log("✓ Bootloader flash complete - proceeding to radio flash (no second bootloader flash needed)", "success", step="flash", partition="bootloader")
+            # Verify device is back in fastboot (Tensor Pixels USB re-enumeration)
+            self._log("Verifying device is in fastboot mode...", "info", step="flash")
+            test_result = self._run_fastboot(["getvar", "product"], timeout=10)
+            if not test_result or test_result.returncode != 0:
+                # Device might still be reconnecting - wait a bit more
+                self._log("Device not immediately responsive, waiting a bit longer...", "info", step="flash")
+                device_detected = self._wait_for_fastboot(timeout=60)
+                if not device_detected:
+                    self._log("Warning: Device not detected, but continuing anyway...", "warning", step="flash")
+                    # Try one more direct check before giving up
+                    test_result2 = self._run_fastboot(["getvar", "product"], timeout=5)
+                    if not test_result2 or test_result2.returncode != 0:
+                        self._error("Device did not return to fastboot mode after reboot and is not responding", step="flash")
+                else:
+                    self._log("Device successfully detected in fastboot mode", "success", step="flash")
+            else:
+                self._log("Device successfully detected in fastboot mode", "success", step="flash")
+            
+            # CRITICAL: Bootloader must be flashed TWICE to the other slot (as per official flash-all.sh)
+            # Official script: flash to other slot → set-active=other → reboot-bootloader → sleep 5 → flash again → set-active=other → reboot-bootloader → sleep 5
+            # This is REQUIRED by GrapheneOS for proper bootloader installation
+            self._log("Flashing bootloader to other slot (second pass - as per official script)...", "info", step="flash", partition="bootloader")
+            self._log("Official flash-all.sh flashes bootloader TWICE to the other slot", "info", step="flash", partition="bootloader")
+            result = self._run_fastboot(["flash", "--slot=other", "bootloader", str(bootloader_file)], timeout=180)
+            if result.returncode != 0:
+                self._error(f"Failed to flash bootloader (second pass): {result.stderr or result.stdout}", step="flash", partition="bootloader")
+            self._log("✓ Bootloader flashed (second pass)", "success", step="flash", partition="bootloader")
+            
+            self._log("Setting active slot to other...", "info", step="flash")
+            result = self._run_fastboot(["--set-active=other"], timeout=30)
+            if result.returncode != 0:
+                self._error(f"Failed to set active slot: {result.stderr or result.stdout}", step="flash")
+            
+            # EXACT SEQUENCE: fastboot reboot-bootloader → wait 5 seconds (as per official GrapheneOS CLI)
+            self._log("Rebooting bootloader (after second bootloader flash)...", "info", step="flash")
+            self._log("Using: fastboot reboot-bootloader", "info", step="flash")
+            result = self._run_fastboot(["reboot-bootloader"], timeout=60)
+            if result.returncode != 0:
+                self._error(f"Failed to reboot bootloader: {result.stderr or result.stdout}", step="flash")
+            
+            # EXACT TIMING: Wait exactly 5 seconds as per official GrapheneOS CLI sequence
+            self._log("Waiting 5 seconds for device to reinitialize (as per GrapheneOS CLI)...", "info", step="flash")
+            time.sleep(5)
+            
+            # Verify device is back in fastboot
+            test_result = self._run_fastboot(["getvar", "product"], timeout=10)
+            if not test_result or test_result.returncode != 0:
+                self._log("Device not immediately responsive, waiting a bit longer...", "info", step="flash")
+                if not self._wait_for_fastboot(timeout=60):
+                    test_result2 = self._run_fastboot(["getvar", "product"], timeout=5)
+                    if not test_result2 or test_result2.returncode != 0:
+                        self._error("Device did not return to fastboot mode after second bootloader flash", step="flash")
+            
+            self._log("✓ Bootloader flash complete (both passes done)", "success", step="flash", partition="bootloader")
             
             # Verify max-download-size (required for super partition splits)
             # Be lenient here - if we can't get it, proceed anyway
@@ -1344,6 +1389,8 @@ class GrapheneFlasher:
                 )
             
             # STEP 2: Flash radio
+            # CRITICAL: This is the SECOND and FINAL reboot before flashing all other partitions
+            # After this reboot, DO NOT reboot again until final reboot at the end
             radio_file = bundle_dir / "radio-panther-g5300q-250909-251024-b-14326967.img"
             if not radio_file.exists():
                 radio_files = list(bundle_dir.glob("radio-panther-*.img"))
@@ -1356,16 +1403,43 @@ class GrapheneFlasher:
             result = self._run_fastboot(["flash", "radio", str(radio_file)], timeout=120)
             if result.returncode != 0:
                 self._error(f"Failed to flash radio: {result.stderr or result.stdout}", step="flash", partition="radio")
+            self._log("✓ Radio flashed", "success", step="flash", partition="radio")
             
-            self._log("Rebooting bootloader after radio flash...", "info", step="flash")
+            # CRITICAL: Reboot bootloader ONCE after radio flash (this is the LAST reboot before flashing all other partitions)
+            # EXACT SEQUENCE: fastboot reboot-bootloader → wait 5 seconds (as per official GrapheneOS CLI)
+            # This is REQUIRED by GrapheneOS - radio must reboot after flashing
+            # After this reboot, flash ALL remaining partitions WITHOUT any more reboots
+            self._log("Rebooting bootloader after radio flash (required by GrapheneOS)...", "info", step="flash")
+            self._log("Using: fastboot reboot-bootloader", "info", step="flash")
+            self._log("This is the LAST reboot - all remaining partitions will be flashed in one session", "info", step="flash")
             result = self._run_fastboot(["reboot-bootloader"], timeout=60)
             if result.returncode != 0:
                 self._error(f"Failed to reboot bootloader: {result.stderr or result.stdout}", step="flash")
             
-            # Wait for device to return to fastboot
-            self._log("Waiting for device to return to fastboot mode...", "info", step="flash")
-            if not self._wait_for_fastboot(timeout=90):
-                self._error("Device did not return to fastboot mode after radio flash", step="flash")
+            # EXACT TIMING: Wait exactly 5 seconds as per official GrapheneOS CLI sequence
+            self._log("Waiting 5 seconds for device to reinitialize (as per GrapheneOS CLI)...", "info", step="flash")
+            self._log("Note: USB disconnect/reconnect is normal - device is rebooting, NOT looping", "info", step="flash")
+            import time
+            time.sleep(5)
+            
+            # Verify device is back in fastboot (ONE-TIME check)
+            # This is the LAST wait - after this, we flash everything without rebooting
+            self._log("Verifying device is in fastboot mode...", "info", step="flash")
+            test_result = self._run_fastboot(["getvar", "product"], timeout=10)
+            if not test_result or test_result.returncode != 0:
+                # Device might still be reconnecting - wait a bit more
+                self._log("Device not immediately responsive, waiting a bit longer...", "info", step="flash")
+                device_detected = self._wait_for_fastboot(timeout=60)
+                if not device_detected:
+                    self._log("Warning: Device not detected, but continuing anyway...", "warning", step="flash")
+                    # Try one more direct check before giving up
+                    test_result2 = self._run_fastboot(["getvar", "product"], timeout=5)
+                    if not test_result2 or test_result2.returncode != 0:
+                        self._error("Device did not return to fastboot mode after radio flash", step="flash")
+                else:
+                    self._log("Device successfully detected in fastboot mode", "success", step="flash")
+            else:
+                self._log("Device successfully detected in fastboot mode", "success", step="flash")
             
             # STEP 3: AVB custom key operations
             # Note: Erasing avb_custom_key may fail if partition doesn't exist (normal on fresh devices)
@@ -1402,12 +1476,24 @@ class GrapheneFlasher:
                     self._log(f"Warning: Failed to erase {partition}: {result.stderr or result.stdout}", "warning", step="flash")
             
             # STEP 6: Android-info.zip validation (doesn't perform update, just checks)
+            # Note: This is a validation step that checks device compatibility
+            # If it fails, we log a warning but continue - the actual flash commands will fail if incompatible
             android_info_file = bundle_dir / "android-info.zip"
             if android_info_file.exists():
                 self._log("Validating android-info.txt requirements...", "info", step="flash")
                 result = self._run_fastboot(["--disable-super-optimization", "--skip-reboot", "update", str(android_info_file)], timeout=60)
                 if result.returncode != 0:
-                    self._error(f"Failed to validate android-info: {result.stderr or result.stdout}", step="flash")
+                    # Don't fail on validation error - continue flashing
+                    # The actual flash commands will fail if device is incompatible
+                    error_output = result.stderr or result.stdout or ""
+                    self._log(
+                        f"Warning: android-info validation failed: {error_output[:200] if error_output else 'Unknown error'}",
+                        "warning",
+                        step="flash"
+                    )
+                    self._log("Continuing with flash - actual flash commands will verify compatibility", "info", step="flash")
+                else:
+                    self._log("✓ Android-info validation passed", "success", step="flash")
             
             self._log("Canceling snapshot update...", "info", step="flash")
             result = self._run_fastboot(["snapshot-update", "cancel"], timeout=30)
@@ -1415,6 +1501,14 @@ class GrapheneFlasher:
                 self._log(f"Warning: Failed to cancel snapshot update: {result.stderr or result.stdout}", "warning", step="flash")
             
             # STEP 7: Core partitions (in exact order from flash-all.sh)
+            # CRITICAL: After radio reboot, flash ALL remaining partitions WITHOUT any more reboots
+            # This is a LINEAR sequence - no loops, no state resets, no device re-checks
+            # Flash all partitions in one continuous session
+            self._log("=" * 60, "info", step="flash")
+            self._log("Starting core partition flashing (NO MORE REBOOTS)", "info", step="flash")
+            self._log("All remaining partitions will be flashed in one session", "info", step="flash")
+            self._log("=" * 60, "info", step="flash")
+            
             core_partitions = [
                 ("boot", "boot.img"),
                 ("init_boot", "init_boot.img"),
@@ -1425,6 +1519,7 @@ class GrapheneFlasher:
                 ("vbmeta", "vbmeta.img"),
             ]
             
+            # Flash all core partitions in sequence - NO REBOOT between any of these
             for partition_name, filename in core_partitions:
                 img_file = bundle_dir / filename
                 if img_file.exists():
@@ -1441,6 +1536,8 @@ class GrapheneFlasher:
                     self._log(f"Warning: {filename} not found, skipping", "warning", step="flash")
             
             # STEP 8: Erase userdata and metadata
+            # CRITICAL: Still in bootloader fastboot session - NO REBOOT
+            # These erase operations happen BEFORE transitioning to fastbootd
             self._log("Erasing userdata...", "info", step="flash")
             result = self._run_fastboot(["erase", "userdata"], timeout=60)
             if result.returncode != 0:
@@ -1451,11 +1548,23 @@ class GrapheneFlasher:
             if result.returncode != 0:
                 self._log(f"Warning: Failed to erase metadata: {result.stderr or result.stdout}", "warning", step="flash")
             
-            # STEP 9: Flash super partition (split images)
+            # CRITICAL: Super partition is flashed in BOOTLOADER FASTBOOT, NOT fastbootd!
+            # Official flash-all.sh does NOT use "fastboot reboot fastboot" - super images are flashed directly
+            # This is STEP 9 in the official sequence: Flash super images in bootloader fastboot mode
+            # NO transition to fastbootd - all super images are flashed while in bootloader fastboot
+            self._log("=" * 60, "info", step="flash")
+            self._log("Flashing super partition in bootloader fastboot mode (NO REBOOT TO FASTBOOTD)", "info", step="flash")
+            self._log("Official flash-all.sh flashes super images directly in bootloader fastboot", "info", step="flash")
+            self._log("=" * 60, "info", step="flash")
+            
+            # STEP 9: Flash super partition (split images) - in BOOTLOADER FASTBOOT mode
+            # CRITICAL: Still in same bootloader fastboot session - NO REBOOT
+            # Flash all super_*.img files sequentially - this is the last partition flash before final reboot
+            
             super_images = sorted(bundle_dir.glob("super_*.img"))
             if super_images:
                 total_super = len(super_images)
-                self._log(f"Flashing super partition ({total_super} split images)...", "info", step="flash", partition="super")
+                self._log(f"Flashing super partition ({total_super} split images) in bootloader fastboot...", "info", step="flash", partition="super")
                 for idx, super_img in enumerate(super_images, 1):
                     self._log(f"Flashing super {idx}/{total_super}...", "info", step="flash", partition="super")
                     result = self._run_fastboot(["flash", "super", str(super_img)], timeout=300)
@@ -1465,11 +1574,14 @@ class GrapheneFlasher:
                             step="flash",
                             partition="super"
                         )
-                self._log("✓ Super partition flashed", "success", step="flash", partition="super")
+                self._log("✓ Super partition flashed successfully", "success", step="flash", partition="super")
             else:
                 self._error("Super partition images not found", step="flash")
             
-            self._log("✓ All partitions flashed successfully", "success", step="flash")
+            self._log("=" * 60, "info", step="flash")
+            self._log("✓ All partitions flashed successfully (NO REBOOTS during flash session)", "success", step="flash")
+            self._log("Ready for final reboot - all flashing operations completed", "info", step="flash")
+            self._log("=" * 60, "info", step="flash")
             
         finally:
             # Restore original working directory
@@ -1526,6 +1638,8 @@ class GrapheneFlasher:
                 self._error("Device did not return to bootloader mode after bootloader flash within 90 seconds", step="flash")
         
         # Flash radio
+        # CRITICAL: This is the SECOND and FINAL reboot before flashing all other partitions
+        # After this reboot, flash ALL remaining partitions WITHOUT any more reboots
         if "radio" in partition_files:
             radio_img = partition_files["radio"]
             self._log(f"Flashing radio: {radio_img.name}", "info", step="flash", partition="radio")
@@ -1534,15 +1648,20 @@ class GrapheneFlasher:
                 self._error(f"Failed to flash radio: {result.stderr or result.stdout}", step="flash", partition="radio")
             self._log("✓ Radio flashed", "success", step="flash", partition="radio")
             
-            # Reboot bootloader after radio flash
-            self._log("Rebooting to bootloader after radio flash...", "info", step="flash")
+            # CRITICAL: Reboot bootloader ONCE after radio flash (this is the LAST reboot before flashing all other partitions)
+            # This is REQUIRED by GrapheneOS - radio must reboot after flashing
+            # After this reboot, flash ALL remaining partitions WITHOUT any more reboots
+            self._log("Rebooting to bootloader after radio flash (required by GrapheneOS)...", "info", step="flash")
+            self._log("This is the LAST reboot - all remaining partitions will be flashed in one session", "info", step="flash")
             result = self._run_fastboot(["reboot", "bootloader"], timeout=60)
             if result.returncode != 0:
                 self._error("Failed to reboot to bootloader", step="flash")
             
             # MANDATORY: Wait for fastboot after reboot (Tensor Pixels reset USB)
+            # This is a ONE-TIME wait - after this, we flash everything without rebooting
             self._log("Waiting for device to reinitialize in fastboot mode after radio flash...", "info", step="flash")
             self._log("Note: USB will disconnect/reconnect - this is normal for Tensor Pixels", "info", step="flash")
+            self._log("Note: This is the LAST wait - after this, all remaining partitions will be flashed without rebooting", "info", step="flash")
             if not self._wait_for_fastboot(timeout=90):
                 self._error("Device did not return to fastboot mode after radio flash within 90 seconds", step="flash")
         

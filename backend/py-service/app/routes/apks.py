@@ -19,12 +19,27 @@ logger = logging.getLogger(__name__)
 # Password for APK upload form
 APK_UPLOAD_PASSWORD = "AllHailToEagle"
 
-# Directory to store uploaded APKs
-APK_STORAGE_DIR = Path("/root/graohen_os/apks")
-
+# Directory to store uploaded APKs - uses APK_STORAGE_DIR from .env or defaults to ~/.graphene-installer/apks
+APK_STORAGE_DIR_STR = settings.APK_STORAGE_DIR
+# Expand user home directory (~) if present
+APK_STORAGE_DIR_STR = os.path.expanduser(APK_STORAGE_DIR_STR)
+APK_STORAGE_DIR = Path(APK_STORAGE_DIR_STR)
 
 # Ensure APK storage directory exists
-APK_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    APK_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+except (OSError, PermissionError) as e:
+    logger.warning(f"Could not create APK storage directory at {APK_STORAGE_DIR}: {e}")
+    # Fallback to a local directory in the project
+    APK_STORAGE_DIR = Path(__file__).parent.parent.parent / "apks"
+    try:
+        APK_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using fallback APK storage directory: {APK_STORAGE_DIR}")
+    except (OSError, PermissionError) as fallback_error:
+        logger.error(f"Failed to create fallback APK storage directory: {fallback_error}")
+        raise
+
+logger.info(f"APK storage directory: {APK_STORAGE_DIR}")
 
 
 class DeviceDetectionRequest(BaseModel):

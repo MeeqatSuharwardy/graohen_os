@@ -84,6 +84,10 @@ class Settings(BaseSettings):
         default="~/.graphene-installer/bundles",
         description="Root directory for GrapheneOS bundles",
     )
+    APK_STORAGE_DIR: str = Field(
+        default="~/.graphene-installer/apks",
+        description="Directory for storing uploaded APK files",
+    )
     SUPPORTED_CODENAMES: str = Field(
         default="cheetah,panther,raven,oriole,husky,shiba,akita,felix,tangorpro,lynx,bluejay,barbet,redfin",
         description="Comma-separated list of supported device codenames",

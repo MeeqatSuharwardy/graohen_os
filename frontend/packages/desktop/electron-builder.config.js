@@ -3,29 +3,61 @@ module.exports = {
   productName: 'FlashDash',
   directories: {
     output: 'out',
+    buildResources: 'assets',
   },
   files: [
     'dist/**/*',
     'dist-electron/**/*',
     'package.json',
+    '!**/*.map',
+    '!node_modules',
   ],
   mac: {
     category: 'public.app-category.utilities',
-    target: ['dmg'],
+    target: [
+      {
+        target: 'dmg',
+        arch: ['x64', 'arm64'],
+      },
+    ],
     icon: 'assets/icon.icns',
+    hardenedRuntime: true,
+    gatekeeperAssess: false,
+    entitlements: 'assets/entitlements.mac.plist',
+    entitlementsInherit: 'assets/entitlements.mac.plist',
   },
   win: {
-    target: ['nsis'],
+    target: [
+      {
+        target: 'nsis',
+        arch: ['x64', 'ia32'],
+      },
+    ],
     icon: 'assets/icon.ico',
   },
   linux: {
-    target: ['AppImage'],
+    target: [
+      {
+        target: 'AppImage',
+        arch: ['x64'],
+      },
+      {
+        target: 'deb',
+        arch: ['x64'],
+      },
+    ],
     icon: 'assets/icon.png',
     category: 'Utility',
+    maintainer: 'FlashDash Team',
+    synopsis: 'GrapheneOS Flashing Dashboard',
+    description: 'Professional GrapheneOS flashing dashboard for Pixel devices',
   },
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: 'FlashDash',
   },
   protocols: [
     {
@@ -33,5 +65,6 @@ module.exports = {
       schemes: ['flashdash'],
     },
   ],
+  publish: null, // Set this if you want to auto-publish to GitHub releases, etc.
 };
 

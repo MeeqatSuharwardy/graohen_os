@@ -94,23 +94,26 @@ app = FastAPI(
 )
 
 # Security Middleware (if available)
+# Note: Rate limiting disabled for development - can be re-enabled in production if needed
 if HAS_SECURITY:
     app.add_middleware(SecurityHeadersMiddleware)
-    app.add_middleware(
-        RateLimitMiddleware,
-        max_requests=100,
-        window_seconds=3600,
-        exclude_paths=["/health", "/docs", "/openapi.json", "/redoc"],
-    )
+    # Rate limiting disabled - uncomment if needed for production
+    # app.add_middleware(
+    #     RateLimitMiddleware,
+    #     max_requests=100,
+    #     window_seconds=3600,
+    #     exclude_paths=["/health", "/docs", "/openapi.json", "/redoc"],
+    # )
 
-# CORS Middleware
-cors_origins = settings.CORS_ORIGINS if isinstance(settings.CORS_ORIGINS, list) else settings.parse_cors_origins(settings.CORS_ORIGINS)
+# CORS Middleware - Allow all origins (no restrictions)
+# Note: This allows all origins for development. For production, you may want to restrict this.
+logger.info("CORS: Allowing all origins (no restrictions)")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins if cors_origins else ["*"],  # Fallback to * if empty
+    allow_origins=["*"],  # Allow all origins - no restrictions
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Include GrapheneOS routers (legacy routes for compatibility)
