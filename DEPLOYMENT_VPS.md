@@ -560,6 +560,28 @@ sudo systemctl restart graphene-backend
 - User must manually grant USB permissions
 - Device must be unlocked with USB debugging enabled
 
+### Issue: Console errors from Chrome extensions
+
+**Symptoms:**
+- Errors like "No checkout popup config found"
+- "The message port closed before a response was received"
+- "chrome.tabs.getSelected is not a function"
+- "csspeeper-inspector-tools" errors
+
+**Solution:**
+These errors are from Chrome extensions (CSS Peeper, payment extensions, etc.) and **do not affect the web-flasher functionality**. The app includes error suppression for these known extension errors.
+
+**To verify the app is working:**
+1. Check if you can see the device connection UI
+2. Check if you can request USB device permissions
+3. Check if builds are loading from the API
+
+If the app UI loads and functions normally, these extension errors can be safely ignored.
+
+**To disable extension errors:**
+- Disable unnecessary Chrome extensions in `chrome://extensions/`
+- Or use an Incognito window (most extensions are disabled by default)
+
 ---
 
 ## Maintenance
