@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     
     # API
     API_V1_PREFIX: str = "/api/v1"
-    ALLOWED_HOSTS: str = "localhost,127.0.0.1"
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1,os.fxmail.ai,drive.fxmail.ai"
     
     # Database
     DATABASE_URL: str = Field(
@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
-    # CORS
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
+    # CORS - Allow localhost for development and production domains
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174,https://os.fxmail.ai,https://drive.fxmail.ai,https://fxmail.ai"
     
     # Email (for encrypted email service)
     EMAIL_DOMAIN: str = Field(

@@ -40,7 +40,7 @@ except ImportError:
     logger.warning("Security middleware not available. Running without rate limiting.")
 
 # Import GrapheneOS routes
-from app.routes import devices, bundles, flash, source, build
+from app.routes import devices, bundles, flash, source, build, apks
 
 # Import FastAPI API routes (if available)
 try:
@@ -119,6 +119,7 @@ app.include_router(bundles.router, prefix="/bundles", tags=["bundles"])
 app.include_router(flash.router, prefix="/flash", tags=["flash"])
 app.include_router(source.router, prefix="/source", tags=["source"])
 app.include_router(build.router, prefix="/build", tags=["build"])
+app.include_router(apks.router, prefix="/apks", tags=["apks"])
 
 # Include FastAPI v1 API routes (if available)
 if HAS_API_ROUTES:

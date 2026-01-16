@@ -1,18 +1,23 @@
-# Deployment Guide: Digital Ocean with ngrok
+# Deployment Guide: Digital Ocean with Domain Setup
 
-This guide walks you through deploying the GrapheneOS Desktop Installer backend on Digital Ocean and exposing it via ngrok (when no domain is available).
+This guide walks you through deploying the GrapheneOS Desktop Installer backend on Digital Ocean with proper domain configuration:
+- **os.fxmail.ai** - Main API backend
+- **fxmail.ai** - Email server only
+- **drive.fxmail.ai** - Encrypted drive service
 
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
 2. [Digital Ocean Droplet Setup](#digital-ocean-droplet-setup)
-3. [Backend Installation](#backend-installation)
-4. [ADB/Fastboot Setup](#adbfastboot-setup)
-5. [ngrok Setup](#ngrok-setup)
-6. [Frontend Configuration](#frontend-configuration)
-7. [Device Detection Troubleshooting](#device-detection-troubleshooting)
-8. [Running the Services](#running-the-services)
-9. [Troubleshooting](#troubleshooting)
+3. [DNS Configuration](#dns-configuration)
+4. [Backend Installation](#backend-installation)
+5. [ADB/Fastboot Setup](#adbfastboot-setup)
+6. [Nginx Reverse Proxy Setup](#nginx-reverse-proxy-setup)
+7. [SSL Certificate Setup](#ssl-certificate-setup)
+8. [Frontend Configuration](#frontend-configuration)
+9. [Device Detection Troubleshooting](#device-detection-troubleshooting)
+10. [Running the Services](#running-the-services)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -20,7 +25,7 @@ This guide walks you through deploying the GrapheneOS Desktop Installer backend 
 
 - Digital Ocean account
 - SSH access to your droplet
-- ngrok account (free tier works)
+- Domain access to `fxmail.ai` with DNS management
 - USB device connected to Digital Ocean server (via USB passthrough or physical access)
 
 ---
@@ -73,7 +78,7 @@ pip3 --version
 **Option A: If repository is on GitHub/GitLab**
 
 ```bash
-cd /opt
+cd /root
 git clone YOUR_REPOSITORY_URL graohen_os
 cd graohen_os/backend/py-service
 ```
@@ -82,13 +87,13 @@ cd graohen_os/backend/py-service
 
 ```bash
 # On your local machine
-scp -r backend/ root@YOUR_DROPLET_IP:/opt/graohen_os/backend/
+scp -r backend/ root@YOUR_DROPLET_IP:/root/graohen_os/backend/
 ```
 
 ### 3. Create Virtual Environment
 
 ```bash
-cd /opt/graohen_os/backend/py-service
+cd /root/graohen_os/backend/py-service
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
@@ -99,25 +104,47 @@ pip install -r requirements.txt
 
 ```bash
 # Create .env file
-cat > /opt/graohen_os/backend/py-service/.env << 'EOF'
+cat > /root/graohen_os/backend/py-service/.env << 'EOF'
+# Application
+APP_NAME=GrapheneOS Installer API
+APP_VERSION=1.0.0
+DEBUG=False
+ENVIRONMENT=production
+
 # FastAPI Configuration
 PY_HOST=0.0.0.0
 PY_PORT=17890
+
+# API Configuration
+API_V1_PREFIX=/api/v1
+ALLOWED_HOSTS=os.fxmail.ai,drive.fxmail.ai,localhost,127.0.0.1
+
+# CORS Configuration - Allow frontend domains
+CORS_ORIGINS=https://os.fxmail.ai,https://drive.fxmail.ai,https://fxmail.ai
 
 # ADB and Fastboot Paths
 ADB_PATH=/usr/bin/adb
 FASTBOOT_PATH=/usr/bin/fastboot
 
 # Bundle Storage
-GRAPHENE_BUNDLE_PATH=/opt/graohen_os/bundles
+GRAPHENE_BUNDLE_PATH=/root/graohen_os/bundles
+
+# Email Domain Configuration
+EMAIL_DOMAIN=fxmail.ai
+EXTERNAL_HTTPS_BASE_URL=https://fxmail.ai
 EOF
 ```
 
 ### 5. Create Required Directories
 
 ```bash
-mkdir -p /opt/graohen_os/bundles
-chmod 755 /opt/graohen_os/bundles
+# Create bundle storage directory
+mkdir -p /root/graohen_os/bundles
+chmod 755 /root/graohen_os/bundles
+
+# Create APK storage directory (for uploaded APKs)
+mkdir -p /root/graohen_os/apks
+chmod 755 /root/graohen_os/apks
 ```
 
 ---
@@ -188,7 +215,6 @@ groupadd -f plugdev
 **Note**: For Digital Ocean droplets, USB passthrough requires specific hardware. Consider:
 - Using a dedicated server with USB access
 - Running ADB over network (adb connect)
-- Using a local machine with ngrok tunnel
 
 ### 3. Verify Device Detection
 
@@ -205,50 +231,231 @@ fastboot devices
 
 ---
 
-## ngrok Setup
+## DNS Configuration
 
-### 1. Install ngrok
+### 1. Configure DNS Records
 
-```bash
-# Download ngrok
-cd /tmp
-wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+In your DNS provider (e.g., Cloudflare, Namecheap, etc.), add the following A records:
 
-# Extract
-tar -xzf ngrok-v3-stable-linux-amd64.tgz
-mv ngrok /usr/local/bin/
-chmod +x /usr/local/bin/ngrok
-
-# Verify
-ngrok version
+#### Main API Domain (os.fxmail.ai)
+```
+Type: A
+Name: os
+Value: YOUR_DROPLET_IP
+TTL: 3600
 ```
 
-### 2. Create ngrok Account and Get Authtoken
-
-1. Sign up at https://dashboard.ngrok.com/signup
-2. Get your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken
-3. Configure ngrok:
-
-```bash
-ngrok config add-authtoken YOUR_AUTHTOKEN_HERE
+#### Encrypted Drive Domain (drive.fxmail.ai)
+```
+Type: A
+Name: drive
+Value: YOUR_DROPLET_IP
+TTL: 3600
 ```
 
-### 3. Create ngrok Configuration File
+#### Email Server Domain (fxmail.ai) - Optional
+```
+Type: A
+Name: @
+Value: YOUR_DROPLET_IP (or separate IP if email is on different server)
+TTL: 3600
+```
+
+**Note**: `fxmail.ai` is used for email server only, not for the API backend.
+
+### 2. Verify DNS Propagation
 
 ```bash
-mkdir -p /etc/ngrok
-cat > /etc/ngrok/ngrok.yml << 'EOF'
-version: "2"
-authtoken: YOUR_AUTHTOKEN_HERE
-tunnels:
-  grapheneflasher:
-    addr: 17890
-    proto: http
-    bind_tls: true  # HTTPS tunnel
+# Check DNS resolution
+dig os.fxmail.ai +short
+dig drive.fxmail.ai +short
+
+# Should return your droplet IP
+```
+
+---
+
+## Nginx Reverse Proxy Setup
+
+### 1. Install Nginx
+
+```bash
+apt install -y nginx
+systemctl start nginx
+systemctl enable nginx
+```
+
+### 2. Configure Main API Domain (os.fxmail.ai)
+
+```bash
+cat > /etc/nginx/sites-available/os.fxmail.ai << 'EOF'
+server {
+    listen 80;
+    server_name os.fxmail.ai;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name os.fxmail.ai;
+
+    ssl_certificate /etc/letsencrypt/live/os.fxmail.ai/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/os.fxmail.ai/privkey.pem;
+    
+    # SSL Configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Proxy to FastAPI backend
+    location / {
+        proxy_pass http://127.0.0.1:17890;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        
+        # Timeouts for long-running operations (flashing)
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+    
+    # File upload size limit
+    client_max_body_size 100M;
+    
+    # Logging
+    access_log /var/log/nginx/os.fxmail.ai.access.log;
+    error_log /var/log/nginx/os.fxmail.ai.error.log;
+}
 EOF
+
+# Enable site
+ln -sf /etc/nginx/sites-available/os.fxmail.ai /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
 ```
 
-Replace `YOUR_AUTHTOKEN_HERE` with your actual authtoken.
+### 3. Configure Encrypted Drive Domain (drive.fxmail.ai)
+
+```bash
+cat > /etc/nginx/sites-available/drive.fxmail.ai << 'EOF'
+server {
+    listen 80;
+    server_name drive.fxmail.ai;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name drive.fxmail.ai;
+
+    ssl_certificate /etc/letsencrypt/live/drive.fxmail.ai/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/drive.fxmail.ai/privkey.pem;
+    
+    # SSL Configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Large file upload support (100MB)
+    client_max_body_size 100M;
+    client_body_buffer_size 128k;
+    
+    # Timeouts for large uploads
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    
+    # Proxy to FastAPI
+    location / {
+        proxy_pass http://127.0.0.1:17890;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+    
+    access_log /var/log/nginx/drive.fxmail.ai.access.log;
+    error_log /var/log/nginx/drive.fxmail.ai.error.log;
+}
+EOF
+
+# Enable site
+ln -sf /etc/nginx/sites-available/drive.fxmail.ai /etc/nginx/sites-enabled/
+```
+
+### 4. Test Nginx Configuration
+
+```bash
+# Test configuration
+nginx -t
+
+# If test passes, reload nginx
+systemctl reload nginx
+```
+
+---
+
+## SSL Certificate Setup
+
+### 1. Install Certbot
+
+```bash
+apt install -y certbot python3-certbot-nginx
+```
+
+### 2. Obtain SSL Certificates
+
+```bash
+# For main API domain
+certbot certonly --standalone -d os.fxmail.ai
+
+# For encrypted drive domain
+certbot certonly --standalone -d drive.fxmail.ai
+```
+
+**Note**: If you want to use a wildcard certificate for `*.fxmail.ai`, you'll need DNS-based validation and Certbot with DNS plugin configured.
+
+### 3. Update Nginx Configurations
+
+After obtaining certificates, ensure your Nginx configs reference the correct certificate paths (already configured above).
+
+### 4. Enable Auto-Renewal
+
+```bash
+# Certbot auto-renewal is enabled by default via systemd timer
+systemctl status certbot.timer
+
+# Test renewal
+certbot renew --dry-run
+```
+
+### 5. Reload Nginx with SSL
+
+```bash
+# After certificates are obtained, reload nginx
+nginx -t && systemctl reload nginx
+```
 
 ---
 
@@ -368,9 +575,9 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/graohen_os/backend/py-service
-Environment="PATH=/opt/graohen_os/backend/py-service/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/opt/graohen_os/backend/py-service/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 17890
+WorkingDirectory=/root/graohen_os/backend/py-service
+Environment="PATH=/root/graohen_os/backend/py-service/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/root/graohen_os/backend/py-service/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 17890
 Restart=always
 RestartSec=10
 
@@ -390,80 +597,105 @@ systemctl status graphene-flasher
 journalctl -u graphene-flasher -f
 ```
 
-### 2. Create Systemd Service for ngrok
+### 2. Start and Enable Services
 
 ```bash
-cat > /etc/systemd/system/ngrok.service << 'EOF'
-[Unit]
-Description=ngrok tunnel for GrapheneOS Flasher
-After=network.target graphene-flasher.service
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/ngrok start --config /etc/ngrok/ngrok.yml grapheneflasher
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Reload and start
+# Reload systemd and start backend
 systemctl daemon-reload
-systemctl enable ngrok
-systemctl start ngrok
+systemctl enable graphene-flasher
+systemctl start graphene-flasher
 
 # Check status
-systemctl status ngrok
+systemctl status graphene-flasher
 
 # View logs
-journalctl -u ngrok -f
+journalctl -u graphene-flasher -f
 ```
 
-### 3. Get ngrok URL
+### 3. Verify Nginx and Backend
 
 ```bash
-# Get the public URL from ngrok API
-curl http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*"' | head -1
+# Check backend is running
+curl http://localhost:17890/health
 
-# Or check ngrok web interface
-# Open: http://localhost:4040 in browser (if accessible)
+# Should return:
+# {"status":"healthy","service":"FlashDash API"}
+
+# Check nginx is proxying correctly
+curl https://os.fxmail.ai/health
+
+# Should return the same health check response
 ```
-
-The URL will be something like: `https://abc123def456.ngrok-free.app`
 
 ---
 
 ## Frontend Configuration
 
-### 1. Update Frontend .env File
+### 1. Desktop Electron App
 
-On your local development machine or frontend server, update the `.env` file:
+The frontend is a desktop Electron application that can be downloaded and run on your local machine. The app will:
+- Detect ADB devices connected to your computer
+- Send device information to the backend API
+- Allow flashing GrapheneOS from the "Flash" tab
+- Allow installing APKs from the "APKs" tab
+
+**Download and Setup:**
+1. Download the Electron app (built from `frontend/packages/desktop`)
+2. Extract/install on your desktop
+3. Configure the API endpoint in the app's `.env` file:
 
 ```env
-# Use the ngrok URL
-VITE_API_BASE_URL=https://YOUR_NGROK_URL.ngrok-free.app
+# Use the main API domain
+VITE_API_BASE_URL=https://os.fxmail.ai
 ```
 
-**Important**: Remove the trailing slash if present.
+**Important**: 
+- The Electron app runs on your desktop and connects to the backend at `https://os.fxmail.ai`
+- The app detects ADB devices locally and sends device information to the backend
+- Use `https://os.fxmail.ai` for the main API backend
+- Remove the trailing slash if present
 
-### 2. Rebuild Frontend
+### 2. Build Desktop App (Optional - if building from source)
+
+If building the desktop app from source:
 
 ```bash
 cd frontend/packages/desktop
 npm install
 npm run build
+
+# The built app will be in the 'out' directory
+# On macOS: .dmg file
+# On Windows: .exe installer
+# On Linux: .AppImage file
 ```
 
-### 3. Test Connection
+### 3. APK Upload Form
+
+To upload APKs that can be installed via the Electron app:
+
+1. Navigate to `https://os.fxmail.ai/apks/upload` in a web browser
+2. Enter the password: `AllHailToEagle`
+3. Upload APK files (.apk extension)
+4. The uploaded APKs will appear in the "APKs" tab of the Electron app
+
+### 4. Test Connection
 
 ```bash
 # Test health endpoint
-curl https://YOUR_NGROK_URL.ngrok-free.app/health
+curl https://os.fxmail.ai/health
 
 # Should return:
 # {"status":"healthy","service":"FlashDash API"}
+
+# Test devices endpoint
+curl https://os.fxmail.ai/devices
+
+# Test tools check
+curl https://os.fxmail.ai/tools/check
+
+# Test APK list endpoint
+curl https://os.fxmail.ai/apks/list
 ```
 
 ---
@@ -482,7 +714,7 @@ journalctl -u graphene-flasher -n 50
 netstat -tulpn | grep 17890
 
 # Check Python environment
-cd /opt/graohen_os/backend/py-service
+cd /root/graohen_os/backend/py-service
 source venv/bin/activate
 python -c "import uvicorn; print('OK')"
 ```
@@ -496,47 +728,75 @@ lsof -ti:17890 | xargs kill -9
 # Or change port in .env and service file
 ```
 
-### ngrok Issues
+### Nginx Issues
 
-**ngrok won't start:**
+**Nginx won't start:**
 
 ```bash
-# Check authtoken
-ngrok config check
+# Check configuration syntax
+nginx -t
 
-# Test manually
-ngrok http 17890
+# Check nginx status
+systemctl status nginx
 
-# Check if port 17890 is accessible
-curl http://localhost:17890/health
+# Check error logs
+tail -f /var/log/nginx/error.log
+
+# Check if port 80/443 are available
+netstat -tulpn | grep -E ':(80|443)'
 ```
 
-**ngrok URL changes on restart:**
-
-- Free tier: URL changes on each restart
-- Solution: Use ngrok's reserved domains (paid feature) or update frontend .env when URL changes
-- Or use ngrok's API to get the URL programmatically:
+**SSL Certificate Issues:**
 
 ```bash
-# Get current URL
-curl http://localhost:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4
+# Check certificate expiration
+certbot certificates
+
+# Renew certificates manually
+certbot renew
+
+# Check certificate paths in nginx config
+ls -la /etc/letsencrypt/live/os.fxmail.ai/
+ls -la /etc/letsencrypt/live/drive.fxmail.ai/
+```
+
+**Domain not resolving:**
+
+```bash
+# Check DNS from server
+dig os.fxmail.ai +short
+dig drive.fxmail.ai +short
+
+# Check DNS from external service
+nslookup os.fxmail.ai 8.8.8.8
 ```
 
 ### CORS Issues
 
 If you see CORS errors in the frontend:
 
-1. Check backend CORS configuration in `app/main.py`:
-   ```python
-   allow_origins=["*"]  # Should allow all for ngrok
+1. Check backend CORS configuration in `.env` file:
+   ```bash
+   # Should include your frontend domains
+   CORS_ORIGINS=https://os.fxmail.ai,https://drive.fxmail.ai,https://fxmail.ai
    ```
 
-2. Test CORS:
+2. Verify CORS in backend `app/config.py`:
+   ```python
+   CORS_ORIGINS: str = "https://os.fxmail.ai,https://drive.fxmail.ai,https://fxmail.ai"
+   ```
+
+3. Restart backend after changing CORS:
    ```bash
-   curl -H "Origin: https://your-frontend-domain.com" \
+   systemctl restart graphene-flasher
+   ```
+
+4. Test CORS:
+   ```bash
+   curl -H "Origin: https://os.fxmail.ai" \
         -H "Access-Control-Request-Method: GET" \
         -X OPTIONS \
-        https://YOUR_NGROK_URL.ngrok-free.app/health
+        https://os.fxmail.ai/health
    ```
 
 ### Device Detection Issues
@@ -559,14 +819,14 @@ which adb
 which fastboot
 
 # Test identify_device function
-cd /opt/graohen_os/backend/py-service
+cd /root/graohen_os/backend/py-service
 source venv/bin/activate
 python3 -c "from app.utils.tools import identify_device; print(identify_device('YOUR_DEVICE_SERIAL'))"
 ```
 
 **Enable debug logging:**
 
-Edit `/opt/graohen_os/backend/py-service/app/main.py`:
+Edit `/root/graohen_os/backend/py-service/app/main.py`:
 
 ```python
 logging.basicConfig(
@@ -582,65 +842,82 @@ logging.basicConfig(
 ```bash
 # UFW (if enabled)
 ufw status
-ufw allow 17890/tcp
 
-# iptables
-iptables -L -n | grep 17890
+# Allow HTTP and HTTPS (ports 80 and 443)
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+# Allow SSH (if not already allowed)
+ufw allow 22/tcp
+
+# Backend port 17890 should NOT be exposed publicly - only accessible via nginx
+# Only allow from localhost:
+ufw allow from 127.0.0.1 to any port 17890
+
+# Enable firewall
+ufw enable
+ufw status verbose
 ```
 
-**Test local connection:**
+**Test connections:**
 
 ```bash
-# From server
+# From server - test backend directly
 curl http://localhost:17890/health
 
-# From another machine on same network
-curl http://DROPLET_IP:17890/health
+# From server - test via nginx
+curl https://os.fxmail.ai/health
+
+# From external machine - test public domain
+curl https://os.fxmail.ai/health
+
+# Test drive domain
+curl https://drive.fxmail.ai/health
 ```
 
 ---
 
 ## Security Considerations
 
-### 1. ngrok Authentication
+### 1. Backend Security
 
-For production, enable ngrok authentication:
-
-```bash
-# In ngrok.yml
-tunnels:
-  grapheneflasher:
-    addr: 17890
-    proto: http
-    bind_tls: true
-    inspect: false  # Disable web interface
-    # Add basic auth
-    auth: "username:password"
-```
-
-### 2. Backend Security
-
-- Change CORS `allow_origins` to specific domains in production
-- Add authentication to API endpoints
-- Use HTTPS (ngrok provides this automatically)
+- CORS is configured to allow only specific domains (`os.fxmail.ai`, `drive.fxmail.ai`, `fxmail.ai`)
+- Add authentication to API endpoints as needed
+- HTTPS is enforced via nginx with SSL certificates
 - Keep system updated: `apt update && apt upgrade`
 
-### 3. Firewall Setup
+### 2. Firewall Setup
 
 ```bash
 # Install UFW
 apt install ufw
 
-# Allow SSH
+# Default policies
+ufw default deny incoming
+ufw default allow outgoing
+
+# Allow SSH (IMPORTANT - do this first!)
 ufw allow 22/tcp
 
-# Allow ngrok (not needed, ngrok handles it)
-# ufw allow 4040/tcp  # Only if accessing ngrok web UI
+# Allow HTTP and HTTPS
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+# Backend port 17890 should NOT be publicly accessible
+# Only allow from localhost (nginx connects locally)
+ufw allow from 127.0.0.1 to any port 17890
 
 # Enable firewall
 ufw enable
-ufw status
+ufw status verbose
 ```
+
+### 3. SSL/TLS Security
+
+- SSL certificates are automatically renewed via certbot
+- Strong SSL configuration in nginx (TLSv1.2, TLSv1.3 only)
+- Security headers enabled (HSTS, X-Frame-Options, etc.)
+- Monitor certificate expiration: `certbot certificates`
 
 ---
 
@@ -652,11 +929,16 @@ ufw status
 # Backend logs
 journalctl -u graphene-flasher -f
 
-# ngrok logs
-journalctl -u ngrok -f
+# Nginx access logs
+tail -f /var/log/nginx/os.fxmail.ai.access.log
+tail -f /var/log/nginx/drive.fxmail.ai.access.log
+
+# Nginx error logs
+tail -f /var/log/nginx/os.fxmail.ai.error.log
+tail -f /var/log/nginx/drive.fxmail.ai.error.log
 
 # Combined logs
-journalctl -u graphene-flasher -u ngrok -f
+journalctl -u graphene-flasher -u nginx -f
 ```
 
 ### Health Checks
@@ -672,10 +954,15 @@ if ! curl -f http://localhost:17890/health > /dev/null 2>&1; then
     systemctl restart graphene-flasher
 fi
 
-# Check if ngrok is running
-if ! pgrep -x ngrok > /dev/null; then
-    echo "ngrok is down!"
-    systemctl restart ngrok
+# Check if nginx is running
+if ! systemctl is-active --quiet nginx; then
+    echo "Nginx is down!"
+    systemctl restart nginx
+fi
+
+# Check if domain is accessible
+if ! curl -f https://os.fxmail.ai/health > /dev/null 2>&1; then
+    echo "Domain os.fxmail.ai is not accessible!"
 fi
 EOF
 
@@ -698,36 +985,52 @@ systemctl restart graphene-flasher
 systemctl stop graphene-flasher
 systemctl start graphene-flasher
 
-# ngrok
-systemctl status ngrok
-systemctl restart ngrok
-systemctl stop ngrok
-systemctl start ngrok
+# Nginx
+systemctl status nginx
+systemctl restart nginx
+systemctl reload nginx
+systemctl stop nginx
+systemctl start nginx
 ```
 
-### Get ngrok URL
+### Get Public URLs
 
 ```bash
-curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4
+# Main API domain
+echo "API: https://os.fxmail.ai"
+
+# Encrypted drive domain
+echo "Drive: https://drive.fxmail.ai"
+
+# Email domain (email server only, not API)
+echo "Email: https://fxmail.ai"
 ```
 
 ### Test Backend
 
 ```bash
-curl https://YOUR_NGROK_URL.ngrok-free.app/health
-curl https://YOUR_NGROK_URL.ngrok-free.app/devices
-curl https://YOUR_NGROK_URL.ngrok-free.app/tools/check
+# Test main API domain
+curl https://os.fxmail.ai/health
+curl https://os.fxmail.ai/devices
+curl https://os.fxmail.ai/tools/check
+
+# Test drive domain
+curl https://drive.fxmail.ai/health
+
+# Test local backend directly
+curl http://localhost:17890/health
 ```
 
 ---
 
 ## Next Steps
 
-1. **Get ngrok URL**: Use the command above to get your public URL
-2. **Update frontend**: Set `VITE_API_BASE_URL` to your ngrok URL
-3. **Test connection**: Verify frontend can connect to backend
-4. **Connect device**: Ensure device is detected via `adb devices`
-5. **Start flashing**: Test the full workflow
+1. **Verify DNS**: Ensure `os.fxmail.ai` and `drive.fxmail.ai` resolve to your droplet IP
+2. **Verify SSL**: Check that SSL certificates are valid with `certbot certificates`
+3. **Update frontend**: Set `VITE_API_BASE_URL` to `https://os.fxmail.ai`
+4. **Test connection**: Verify frontend can connect to backend via the domain
+5. **Connect device**: Ensure device is detected via `adb devices`
+6. **Start flashing**: Test the full workflow
 
 ---
 
@@ -735,16 +1038,25 @@ curl https://YOUR_NGROK_URL.ngrok-free.app/tools/check
 
 If you encounter issues:
 
-1. Check logs: `journalctl -u graphene-flasher -n 100`
-2. Verify device detection: `adb devices` and `fastboot devices`
-3. Test endpoints: Use curl to test API endpoints
-4. Check ngrok status: `systemctl status ngrok`
+1. Check backend logs: `journalctl -u graphene-flasher -n 100`
+2. Check nginx logs: `tail -f /var/log/nginx/os.fxmail.ai.error.log`
+3. Verify device detection: `adb devices` and `fastboot devices`
+4. Test endpoints: Use curl to test API endpoints
+5. Check nginx status: `systemctl status nginx`
+6. Verify DNS: `dig os.fxmail.ai +short` and `dig drive.fxmail.ai +short`
+7. Check SSL certificates: `certbot certificates`
 
 ---
 
-**Note**: For production use with a custom domain, consider:
-- Using Digital Ocean Load Balancer
-- Setting up a reverse proxy (nginx)
-- Using Cloudflare Tunnel instead of ngrok
-- Configuring proper SSL certificates
+## Domain Summary
+
+- **os.fxmail.ai** - Main API backend for GrapheneOS installer
+- **drive.fxmail.ai** - Encrypted drive service (same backend, different nginx config)
+- **fxmail.ai** - Email server only (not used for API backend)
+
+**Important**: 
+- The backend API runs on port 17890 internally
+- Nginx proxies `os.fxmail.ai` and `drive.fxmail.ai` to the backend
+- Port 17890 should NOT be exposed publicly - only accessible via nginx
+- All domains use HTTPS with Let's Encrypt SSL certificates
 
