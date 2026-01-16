@@ -11,7 +11,7 @@ import type { BuildInfo } from '@flashdash/flasher-ui/components/BuildSelector';
 import type { FlashState } from '@flashdash/flasher';
 
 export function FlasherPage() {
-  const { devices, loading, error, requestDevice, connectDevice, isSupported } = useDevice();
+  const { devices, error, requestDevice, connectDevice, isSupported } = useDevice();
   const { isFlashing, progress, error: flashError, startFlash, cancelFlash } = useFlasher();
   const [selectedBuild, setSelectedBuild] = useState<BuildInfo | null>(null);
   const [availableBuilds, setAvailableBuilds] = useState<BuildInfo[]>([]);
@@ -66,8 +66,8 @@ export function FlasherPage() {
   // Auto-connect first device when available
   useEffect(() => {
     if (devices.length > 0 && devices[0].state === 'disconnected') {
-      connectDevice(devices[0].serial).catch((err) => {
-        setLogs((prev) => [...prev, { message: `Failed to connect: ${err.message}`, level: 'error' }]);
+      connectDevice(devices[0].serial).catch((err: Error) => {
+        setLogs((prev: Array<{ message: string; level?: 'info' | 'warning' | 'error' }>) => [...prev, { message: `Failed to connect: ${err.message}`, level: 'error' }]);
       });
     }
   }, [devices]);
@@ -81,11 +81,11 @@ export function FlasherPage() {
       deviceSerial: device.serial,
       build: selectedBuild,
       skipUnlock: false,
-      onProgress: (prog) => {
-        setLogs((prev) => [...prev, { message: prog.message, level: 'info' }]);
+      onProgress: (prog: { message: string }) => {
+        setLogs((prev: Array<{ message: string; level?: 'info' | 'warning' | 'error' }>) => [...prev, { message: prog.message, level: 'info' }]);
       },
-      onLog: (message, level) => {
-        setLogs((prev) => [...prev, { message, level: level || 'info' }]);
+      onLog: (message: string, level?: 'info' | 'warning' | 'error') => {
+        setLogs((prev: Array<{ message: string; level?: 'info' | 'warning' | 'error' }>) => [...prev, { message, level: level || 'info' }]);
       },
     });
   };

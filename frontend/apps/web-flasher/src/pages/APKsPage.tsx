@@ -69,7 +69,7 @@ export function APKsPage() {
   };
 
   const handleInstall = async (apkFilename: string, deviceSerial: string) => {
-    setInstalling((prev) => ({ ...prev, [apkFilename]: true }));
+    setInstalling((prev: Record<string, boolean>) => ({ ...prev, [apkFilename]: true }));
     setError(null);
     setSuccess(null);
 
@@ -94,7 +94,7 @@ export function APKsPage() {
       setError(err.message || `Failed to install ${apkFilename}`);
       setTimeout(() => setError(null), 5000);
     } finally {
-      setInstalling((prev) => ({ ...prev, [apkFilename]: false }));
+      setInstalling((prev: Record<string, boolean>) => ({ ...prev, [apkFilename]: false }));
     }
   };
 
@@ -136,7 +136,7 @@ export function APKsPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {apks.map((apk) => (
+              {apks.map((apk: APK) => (
                 <div key={apk.filename} className="p-4 rounded-lg border bg-card/50 backdrop-blur-sm">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
@@ -150,7 +150,7 @@ export function APKsPage() {
                     </div>
                     <div className="flex gap-2">
                       {devices.length > 0 ? (
-                        devices.map((device) => (
+                        devices.map((device: Device) => (
                           <Button
                             key={device.serial}
                             size="sm"
