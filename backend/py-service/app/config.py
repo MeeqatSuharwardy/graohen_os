@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
     
     # Email (for encrypted email service)
+    EMAIL_DOMAIN: str = Field(
+        default="fxmail.ai",
+        description="Email domain for generating email addresses",
+    )
     EXTERNAL_HTTPS_BASE_URL: str = Field(
         default="https://fxmail.ai",
         description="Base URL for external email links",

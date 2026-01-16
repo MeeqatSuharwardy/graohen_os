@@ -1,4 +1,4 @@
-
+# Requirements for Python 3.10
 # AWS
 # Cache
 # Configuration
@@ -27,7 +27,7 @@ python-dotenv==1.0.0
 python-jose[cryptography]==3.3.0
 python-multipart==0.0.6
 redis==5.0.1
-ruff==0.1.11
+ruff==0.1.15
 sqlalchemy[asyncio]==2.0.25
 sse-starlette==1.8.2
 uvicorn[standard]==0.27.0

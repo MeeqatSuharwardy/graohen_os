@@ -4,7 +4,7 @@ Rate limiting and security middleware for FastAPI.
 """
 
 import time
-from typing import Callable
+from typing import Callable, Optional
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware

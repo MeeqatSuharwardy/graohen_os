@@ -12,7 +12,8 @@ from app.config import settings
 # Import secure logging
 try:
     from app.core.secure_logging import setup_secure_logging
-    logger = setup_secure_logging().getLogger(__name__)
+    setup_secure_logging()
+    logger = logging.getLogger(__name__)
 except ImportError:
     # Fallback to basic logging if secure_logging not available
     logging.basicConfig(

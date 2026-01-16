@@ -20,6 +20,11 @@ from app.core.security import (
 )
 from app.core.redis_client import get_redis
 from app.core.database import get_db
+from app.core.security_hardening import (
+    get_security_service,
+    SecurityEvent,
+    BruteForceError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 

@@ -12,7 +12,6 @@ from app.config import settings
 from app.services.email_service import (
     get_email_service,
     EmailEncryptionError,
-    EMAIL_DOMAIN,
 )
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.redis_client import get_redis
@@ -189,6 +188,7 @@ def generate_secure_link(email_id: str, base_url: Optional[str] = None) -> str:
 @router.post("/send", response_model=EmailSendResponse, status_code=status.HTTP_201_CREATED)
 async def send_email(
     email_data: EmailSendRequest,
+    request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
@@ -199,6 +199,8 @@ async def send_email(
     """
     try:
         service = get_email_service()
+        security = get_security_service()
+        client_ip = request.client.host if request.client else "unknown"
         
         # Prepare email body (include subject in body for encryption)
         email_body_content = email_data.body
@@ -298,6 +300,7 @@ async def send_email(
 @router.get("/{email_id}", response_model=EmailGetResponse)
 async def get_email(
     email_id: str,
+    request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
@@ -308,6 +311,8 @@ async def get_email(
     """
     try:
         service = get_email_service()
+        security = get_security_service()
+        client_ip = request.client.host if request.client else "unknown"
         user_email = current_user.get("email")
         
         # Decrypt email for authenticated user
@@ -454,6 +459,7 @@ async def get_email(
 async def unlock_email(
     email_id: str,
     unlock_data: EmailUnlockRequest,
+    request: Request,
     x_forwarded_for: Optional[str] = Header(None, alias="X-Forwarded-For"),
     user_agent: Optional[str] = Header(None, alias="User-Agent"),
 ):
@@ -464,6 +470,10 @@ async def unlock_email(
     After max attempts, email is locked for 1 hour.
     """
     try:
+        security = get_security_service()
+        client_ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else (request.client.host if request.client else "unknown")
+        identifier = f"{email_id}:{client_ip}"
+        
         # Check rate limit (using email_id as identifier)
         attempts_remaining = await get_unlock_attempts_remaining(email_id)
         
@@ -533,7 +543,7 @@ async def unlock_email(
             try:
                 await security.enforce_view_once(
                     content_id=email_id,
-                    identifier=client_ip,
+                    identifier=identifier,
                 )
             except ViewOnceError:
                 raise HTTPException(
@@ -573,7 +583,6 @@ async def unlock_email(
             logger.info(f"Email self-destructed after unlock: {email_id[:8]}...")
         
         # Log successful unlock
-        client_ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else "unknown"
         logger.info(
             f"Email unlocked: id={email_id[:8]}..., "
             f"ip={client_ip}, ua={user_agent[:50] if user_agent else 'unknown'}"

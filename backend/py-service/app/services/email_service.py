@@ -29,12 +29,13 @@ from app.core.key_manager import (
     get_key_manager,
 )
 from app.core.redis_client import get_redis
+from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Email domain
-EMAIL_DOMAIN = "fxmail.ai"
+# Email domain (from config)
+EMAIL_DOMAIN = settings.EMAIL_DOMAIN
 
 # Redis key prefixes
 REDIS_EMAIL_PREFIX = "email:"
