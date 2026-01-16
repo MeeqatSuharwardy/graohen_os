@@ -48,7 +48,7 @@ module.exports = {
     ],
     executableName: 'flashdash',
     category: 'Utility',
-    maintainer: 'FlashDash Team',
+    maintainer: 'FlashDash Team <support@flashdash.dev>',
     synopsis: 'GrapheneOS Flashing Dashboard',
     description: 'Professional GrapheneOS flashing dashboard for Pixel devices',
   },
