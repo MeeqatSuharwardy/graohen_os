@@ -34,6 +34,8 @@ module.exports = {
       },
     ],
     icon: 'assets/icon.ico',
+    signAndEditExecutable: false,
+    signDlls: false,
   },
   linux: {
     target: [
