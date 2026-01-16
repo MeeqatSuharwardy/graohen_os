@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@flas
 import { Button } from '@flashdash/ui';
 import { Badge } from '@flashdash/ui';
 import { Alert, AlertDescription, AlertTitle } from '@flashdash/ui';
-import { Activity, Smartphone, AlertTriangle, CheckCircle2, Package, Download, Trash2 } from 'lucide-react';
+import { Activity, Smartphone, AlertTriangle, CheckCircle2, Package, Download } from 'lucide-react';
 import { apiClient } from '../lib/api';
 
 interface APK {
@@ -66,7 +66,7 @@ export function APKs() {
     setSuccess(null);
 
     try {
-      const response = await apiClient.post('/apks/install', {
+      await apiClient.post('/apks/install', {
         device_serial: deviceSerial,
         apk_filename: apkFilename,
       });
