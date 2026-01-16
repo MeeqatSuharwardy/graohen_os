@@ -11,10 +11,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@yume-chan/adb": "^0.0.17",
-    "@yume-chan/adb-backend-webusb": "^0.0.17",
-    "@yume-chan/fastboot": "^0.0.17",
-    "@yume-chan/fastboot-backend-webusb": "^0.0.17"
+    "@yume-chan/adb": "workspace:*",
+    "@yume-chan/adb-backend-webusb": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
