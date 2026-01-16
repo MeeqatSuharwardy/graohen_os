@@ -15,7 +15,6 @@ function detectOS(): 'windows' | 'mac' | 'linux' | 'unknown' {
 }
 
 function getDownloadUrl(os: string): string {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
   const winUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_WIN || '#';
   const macUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_MAC || '#';
   const linuxUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_LINUX || '#';

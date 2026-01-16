@@ -114,7 +114,7 @@ export function Dashboard() {
           size="lg"
           onClick={() => {
             const webFlasherUrl = import.meta.env.VITE_WEB_FLASHER_URL || 
-              (process.env.NODE_ENV === 'production' 
+              (import.meta.env.PROD 
                 ? `${window.location.origin}/flash` 
                 : 'http://localhost:5175');
             window.open(webFlasherUrl, '_blank');
