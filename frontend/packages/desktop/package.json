@@ -7,7 +7,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "pnpm build:electron && concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on http://localhost:5174 && electron .\"",
-    "build": "pnpm build:app && pnpm build:electron && electron-builder",
+    "build": "pnpm build:app && pnpm build:electron && SNAP_CRAFT_PATH= electron-builder --linux AppImage deb",
     "build:app": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:mac": "pnpm build:app && pnpm build:electron && electron-builder --mac",
