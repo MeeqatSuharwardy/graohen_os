@@ -2,7 +2,7 @@ module.exports = {
   appId: 'com.flashdash.app',
   productName: 'FlashDash',
   directories: {
-    output: 'out',
+    output: 'dist',
     buildResources: 'assets',
   },
   files: [
@@ -46,7 +46,7 @@ module.exports = {
         arch: ['x64'],
       },
     ],
-    icon: 'assets/icon.png',
+    executableName: 'flashdash',
     category: 'Utility',
     maintainer: 'FlashDash Team',
     synopsis: 'GrapheneOS Flashing Dashboard',

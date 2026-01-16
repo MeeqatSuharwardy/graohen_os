@@ -1,6 +1,8 @@
 {
   "name": "@flashdash/desktop",
   "version": "1.0.0",
+  "description": "Professional GrapheneOS flashing dashboard for Pixel devices",
+  "author": "FlashDash Team",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
