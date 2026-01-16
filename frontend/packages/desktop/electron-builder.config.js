@@ -34,6 +34,7 @@ module.exports = {
       },
     ],
     icon: 'assets/icon.ico',
+    sign: null,
     signAndEditExecutable: false,
     signDlls: false,
   },
