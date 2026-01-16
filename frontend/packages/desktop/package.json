@@ -11,7 +11,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "pnpm build:electron && concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on http://localhost:5174 && electron .\"",
-    "build": "pnpm build:app && pnpm build:electron && electron-builder --win",
+    "build": "CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:app && pnpm build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "build:app": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:mac": "pnpm build:app && pnpm build:electron && electron-builder --mac",
