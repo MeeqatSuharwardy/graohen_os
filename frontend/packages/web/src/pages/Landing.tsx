@@ -15,7 +15,7 @@ function detectOS(): 'windows' | 'mac' | 'linux' | 'unknown' {
 }
 
 function getDownloadUrl(os: string): string {
-  const winUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_WIN || '#';
+  const winUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_WIN || 'https://os.fxmail.ai/download/@flashdashdesktop%20Setup%201.0.0.exe';
   const macUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_MAC || '#';
   const linuxUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_LINUX || '#';
 
