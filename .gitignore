@@ -17,7 +17,7 @@ env/
 bundles/
 Archive/
 # Build outputs
-dist/
+
 build/
 *.egg-info/
 
