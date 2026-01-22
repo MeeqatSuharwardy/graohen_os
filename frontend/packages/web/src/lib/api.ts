@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:17890';
+// Default to localhost:8000 for local development (matches Docker backend port)
+// In production, this should be set via VITE_API_BASE_URL environment variable
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
+  (import.meta.env.DEV ? 'http://localhost:8000' : 'http://localhost:8000');
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

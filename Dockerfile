@@ -32,10 +32,20 @@ RUN npm install -g pnpm
 
 # Copy frontend files (exclude electron-flasher as it's not needed for web deployment)
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+# Copy packages directory (includes yume-chan packages)
+# IMPORTANT: yume-chan packages must be present for workspace resolution
 COPY frontend/packages ./packages
 COPY frontend/apps/web-flasher ./apps/web-flasher
 
+# Verify yume-chan packages are present (required for device-manager)
+RUN if [ ! -f "packages/yume-chan/libraries/adb/package.json" ]; then \
+      echo "ERROR: yume-chan/adb package not found! Make sure it's committed to git." && \
+      echo "Run: git add frontend/packages/yume-chan/ && git commit" && \
+      exit 1; \
+    fi
+
 # Install dependencies (allow lockfile updates if needed)
+# Workspace packages must be present before this step
 RUN pnpm install --no-frozen-lockfile || pnpm install
 # Verify lucide-react is installed and reinstall if needed
 RUN (cd apps/web-flasher && pnpm list lucide-react || pnpm add lucide-react@^0.309.0) || pnpm install
