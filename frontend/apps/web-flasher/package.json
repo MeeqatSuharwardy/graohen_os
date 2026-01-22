@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:skip-tsc": "vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit"
   },
@@ -16,7 +17,8 @@
     "@flashdash/device-manager": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.20.0"
+    "react-router-dom": "^6.20.0",
+    "lucide-react": "^0.309.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

@@ -21,10 +21,9 @@ module.exports = {
       },
     ],
     icon: 'assets/icon.icns',
-    hardenedRuntime: true,
+    hardenedRuntime: false,
     gatekeeperAssess: false,
-    entitlements: 'assets/entitlements.mac.plist',
-    entitlementsInherit: 'assets/entitlements.mac.plist',
+    identity: null, // Disable code signing for development builds
   },
   win: {
     target: [

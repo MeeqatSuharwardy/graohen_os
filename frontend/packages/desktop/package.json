@@ -1,5 +1,5 @@
 {
-  "name": "@flashdash/desktop",
+  "name": "flashdash-desktop",
   "version": "1.0.0",
   "description": "Professional GrapheneOS flashing dashboard for Pixel devices",
   "homepage": "https://github.com/flashdash/flashdash",

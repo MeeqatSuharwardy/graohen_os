@@ -18,7 +18,6 @@ bundles/
 Archive/
 # Build outputs
 
-build/
 *.egg-info/
 
 # Environment
@@ -44,6 +43,11 @@ logs/
 # Electron
 out/
 release/
+
+# Desktop builds - KEEP THESE (they're in downloads/)
+# downloads/windows/
+# downloads/mac/
+# downloads/linux/
 
 # Testing
 coverage/

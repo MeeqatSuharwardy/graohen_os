@@ -8,6 +8,12 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    // Ensure workspace packages are resolved correctly
+    preserveSymlinks: false,
+  },
+  optimizeDeps: {
+    // Include workspace packages in optimization
+    include: ['@flashdash/flasher', '@flashdash/flasher-ui', '@flashdash/device-manager'],
   },
   server: {
     port: 5175,

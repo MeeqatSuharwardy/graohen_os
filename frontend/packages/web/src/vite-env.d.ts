@@ -6,6 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_DESKTOP_DOWNLOAD_WIN?: string;
   readonly VITE_DESKTOP_DOWNLOAD_MAC?: string;
   readonly VITE_DESKTOP_DOWNLOAD_LINUX?: string;
+  readonly VITE_DOWNLOAD_BASE_URL?: string;
   readonly VITE_DESKTOP_PROTOCOL?: string;
   readonly VITE_WEB_FLASHER_URL?: string;
   readonly DEV: boolean;

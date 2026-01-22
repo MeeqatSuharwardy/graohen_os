@@ -1,0 +1,34 @@
+services:
+  flashdash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flashdash
+    ports:
+      - "80:80"
+      - "8000:8000"
+    volumes:
+      - ./bundles:/app/bundles
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+    environment:
+      - PY_HOST=0.0.0.0
+      - PY_PORT=8000
+      - BUNDLES_DIR=/app/bundles
+      - GRAPHENE_BUNDLES_ROOT=/app/bundles
+      - APK_STORAGE_DIR=/app/apks
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - FRONTEND_DOMAIN=${FRONTEND_DOMAIN:-frontend.fxmail.ai}
+      - BACKEND_DOMAIN=${BACKEND_DOMAIN:-backend.fxmail.ai}
+      - API_BASE_URL=${API_BASE_URL:-https://backend.fxmail.ai}
+    restart: unless-stopped
+    devices:
+      - /dev/bus/usb:/dev/bus/usb  # For USB device access (Linux only)
+    privileged: true  # Required for USB device access
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

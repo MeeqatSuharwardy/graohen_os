@@ -180,12 +180,16 @@ pnpm install
 pnpm build
 
 # Or build individually:
-# pnpm build:desktop  # Electron app
-# pnpm build:web      # Main web app
-# pnpm build:web-flasher  # Online flasher (IMPORTANT for /flash route)
+# pnpm build:desktop        # Electron app (Linux builds only on VPS)
+# pnpm build:desktop:linux  # Electron app for Linux
+# pnpm build:web            # Main web app
+# pnpm build:web-flasher    # Online flasher (IMPORTANT for /flash route)
 ```
 
-**IMPORTANT:** The `web-flasher` app must be built for the `/flash` route to work!
+**IMPORTANT:** 
+- The `web-flasher` app must be built for the `/flash` route to work!
+- On Linux VPS, `electron-builder` will only build Linux targets (AppImage, deb) by default
+- If you see snap build errors, the build script is configured to only build AppImage and deb packages
 
 ### 3. Create Frontend Directories
 

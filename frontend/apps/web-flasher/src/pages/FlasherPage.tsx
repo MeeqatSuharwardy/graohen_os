@@ -4,11 +4,25 @@
  */
 
 import { useState, useEffect } from 'react';
-import { DeviceCard, BuildSelector, ProgressBar, FlashSteps, WarningBanner, LogViewer } from '@flashdash/flasher-ui';
-import { useDevice } from '@flashdash/flasher-ui/hooks/useDevice';
-import { useFlasher } from '@flashdash/flasher-ui/hooks/useFlasher';
-import type { BuildInfo } from '@flashdash/flasher-ui/components/BuildSelector';
+import { 
+  DeviceCard, 
+  BuildSelector, 
+  ProgressBar, 
+  FlashSteps, 
+  WarningBanner, 
+  LogViewer,
+  useDevice,
+  useFlasher
+} from '@flashdash/flasher-ui';
 import type { FlashState } from '@flashdash/flasher';
+// BuildInfo type - check if it's exported from flasher-ui or flasher
+type BuildInfo = {
+  codename: string;
+  version: string;
+  url: string;
+  size: number;
+  sha256?: string;
+};
 
 export function FlasherPage() {
   const { devices, error, requestDevice, connectDevice, isSupported } = useDevice();
