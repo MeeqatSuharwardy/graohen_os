@@ -22,12 +22,12 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "production"
     
     # Server
-    PY_HOST: str = "127.0.0.1"
-    PY_PORT: int = 17890
+    PY_HOST: str = "0.0.0.0"
+    PY_PORT: int = 8000
     
     # API
     API_V1_PREFIX: str = "/api/v1"
-    ALLOWED_HOSTS: str = "localhost,127.0.0.1,freedomos.vulcantech.co,backend.vulcantech.tech,vulcantech.tech"
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1,freedomos.vulcantech.co,vulcantech.tech"
     
     # Database
     DATABASE_URL: str = Field(

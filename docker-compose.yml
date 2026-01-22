@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://freedomos.vulcantech.co}
+        VITE_API_BASE_URL: https://freedomos.vulcantech.co
     container_name: flashdash
     ports:
       - "81:80" # HTTP port (using 81 to avoid conflict with system nginx on port 80)
@@ -24,15 +24,16 @@ services:
       - APK_STORAGE_DIR=/app/apks
       - DEBUG=false
       - LOG_LEVEL=INFO
-      - FRONTEND_DOMAIN=${FRONTEND_DOMAIN:-frontend.vulcantech.tech}
-      - BACKEND_DOMAIN=${BACKEND_DOMAIN:-freedomos.vulcantech.co}
-      - EMAIL_DOMAIN=${EMAIL_DOMAIN:-vulcantech.tech}
-      - DRIVE_DOMAIN=${DRIVE_DOMAIN:-freedomos.vulcantech.co}
-      - API_BASE_URL=${API_BASE_URL:-https://freedomos.vulcantech.co}
-      - EXTERNAL_HTTPS_BASE_URL=${EXTERNAL_HTTPS_BASE_URL:-https://vulcantech.tech}
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-https://freedomos.vulcantech.co}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-freedomos.vulcantech.co,vulcantech.tech,localhost,127.0.0.1}
+      - ENVIRONMENT=production
+      - FRONTEND_DOMAIN=freedomos.vulcantech.co
+      - BACKEND_DOMAIN=freedomos.vulcantech.co
+      - EMAIL_DOMAIN=vulcantech.tech
+      - DRIVE_DOMAIN=freedomos.vulcantech.co
+      - API_BASE_URL=https://freedomos.vulcantech.co
+      - EXTERNAL_HTTPS_BASE_URL=https://vulcantech.tech
+      - VITE_API_BASE_URL=https://freedomos.vulcantech.co
+      - CORS_ORIGINS=*
+      - ALLOWED_HOSTS=freedomos.vulcantech.co,vulcantech.tech
     restart: unless-stopped
     devices:
       - /dev/bus/usb:/dev/bus/usb # For USB device access (Linux only)

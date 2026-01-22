@@ -37,19 +37,38 @@ FlashDash provides:
 
 ### Local Development
 
+**Quick Start:**
 ```bash
 # Clone repository
 git clone <repository-url>
 cd graohen_os
 
-# Start services
+# Start services with Docker
 docker-compose up -d
 
-# Access services
-# Frontend: http://localhost/
-# Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
+# Access services:
+# - Frontend: http://localhost:81
+# - Backend API: http://localhost:8000
+# - API Docs: http://localhost:8000/docs
+# - Health Check: http://localhost:8000/health
 ```
+
+**Manual Setup (Backend + Frontend separately):**
+```bash
+# Backend
+cd backend/py-service
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+# Frontend (in new terminal)
+cd frontend
+pnpm install
+pnpm dev:web  # Runs on http://localhost:5173
+```
+
+See [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md) or [RUN_LOCALLY.md](./RUN_LOCALLY.md) for complete local setup guide.
 
 ### Production Deployment
 

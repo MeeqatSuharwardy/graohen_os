@@ -1,4 +1,7 @@
 #!/bin/bash
+# Enhanced startup script that can trigger Electron app launch
+# This runs inside Docker and can notify the host to start Electron
+
 set -e
 
 echo "=========================================="
@@ -48,7 +51,6 @@ echo "Backend PID: $BACKEND_PID"
 
 # Wait for backend to be ready
 echo "Waiting for backend to be ready..."
-# Give backend time to start
 sleep 3
 
 # Check if backend is responding
@@ -57,7 +59,6 @@ if ! check_service "http://localhost:8000/health" "Backend"; then
     tail -50 /app/logs/backend.log
     echo ""
     echo "Testing backend connection..."
-    # Try multiple times with different methods
     for i in {1..5}; do
         if curl -f -s http://localhost:8000/health > /dev/null 2>&1; then
             echo "✓ Backend is responding (attempt $i)"
@@ -66,7 +67,6 @@ if ! check_service "http://localhost:8000/health" "Backend"; then
         echo "Waiting for backend (attempt $i/5)..."
         sleep 2
     done
-    # Don't exit - backend might be running but slow to respond
     echo "⚠️  Continuing - backend process is running"
 fi
 
@@ -89,7 +89,6 @@ echo "API Docs: http://localhost:8000/docs"
 echo ""
 echo "To start Electron app locally, run:"
 echo "  ./start-electron-with-docker.sh"
-echo "  Or: cd frontend/packages/desktop && pnpm dev"
 echo "=========================================="
 
 # Keep container running and monitor processes

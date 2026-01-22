@@ -25,8 +25,9 @@ COPY backend/flasher.py /app/backend/flasher.py
 # Stage 2: Frontend build
 FROM node:20-slim as frontend-builder
 
-# Accept build argument for API URL
+# Accept build argument for API URL (production default)
 ARG VITE_API_BASE_URL=https://freedomos.vulcantech.co
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 WORKDIR /app
 

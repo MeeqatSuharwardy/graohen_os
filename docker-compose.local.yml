@@ -1,0 +1,46 @@
+# Docker Compose for Local Development
+# Usage: docker-compose -f docker-compose.local.yml up -d
+
+services:
+  flashdash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    container_name: flashdash-local
+    ports:
+      - "81:80"    # Frontend HTTP
+      - "8000:8000"  # Backend API
+    volumes:
+      - ./bundles:/app/bundles
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+    environment:
+      - PY_HOST=0.0.0.0
+      - PY_PORT=8000
+      - BUNDLES_DIR=/app/bundles
+      - GRAPHENE_BUNDLES_ROOT=/app/bundles
+      - APK_STORAGE_DIR=/app/apks
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - ENVIRONMENT=development
+      - FRONTEND_DOMAIN=localhost
+      - BACKEND_DOMAIN=localhost
+      - EMAIL_DOMAIN=localhost
+      - DRIVE_DOMAIN=localhost
+      - API_BASE_URL=http://localhost:8000
+      - EXTERNAL_HTTPS_BASE_URL=http://localhost:8000
+      - VITE_API_BASE_URL=http://localhost:8000
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:81,http://127.0.0.1:81
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+    restart: unless-stopped
+    devices:
+      - /dev/bus/usb:/dev/bus/usb  # For USB device access (Linux/Mac)
+    privileged: true  # Required for USB device access
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
