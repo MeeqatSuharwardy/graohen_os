@@ -21,7 +21,7 @@ Complete step-by-step guide for deploying FlashDash on Ubuntu VPS with Docker, i
 
 ### Required Accounts & Services
 
-- ✅ Domain registered (`fxmail.ai`)
+- ✅ Domain registered (`vulcantech.tech`)
 - ✅ Cloudflare account with domain added (recommended)
 - ✅ Ubuntu 20.04+ VPS with:
   - Minimum 2GB RAM, 2 CPU cores
@@ -87,10 +87,9 @@ TTL: Auto
 Wait 5-15 minutes, then verify:
 
 ```bash
-dig frontend.fxmail.ai
-dig backend.fxmail.ai
-dig fxmail.ai
-dig drive.fxmail.ai
+dig frontend.vulcantech.tech
+dig backend.vulcantech.tech
+dig vulcantech.tech
 
 # All should return your server IP
 ```
@@ -169,23 +168,23 @@ cp .env.example .env
 # Or create manually
 cat > .env << EOF
 # Domain Configuration
-# frontend.fxmail.ai - Main web application (React frontend)
-FRONTEND_DOMAIN=frontend.fxmail.ai
+# frontend.vulcantech.tech - Main web application (React frontend)
+FRONTEND_DOMAIN=frontend.vulcantech.tech
 
-# backend.fxmail.ai - API server (FastAPI backend)
-BACKEND_DOMAIN=backend.fxmail.ai
+# backend.vulcantech.tech - API server (FastAPI backend - handles email, drive, and all backend)
+BACKEND_DOMAIN=backend.vulcantech.tech
 
-# fxmail.ai - Email service (main domain for email addresses)
-EMAIL_DOMAIN=fxmail.ai
+# vulcantech.tech - Email service (main domain for email addresses like howie@vulcantech.tech)
+EMAIL_DOMAIN=vulcantech.tech
 
-# drive.fxmail.ai - Drive/file storage service
-DRIVE_DOMAIN=drive.fxmail.ai
+# backend.vulcantech.tech - Drive/file storage service (same as backend)
+DRIVE_DOMAIN=backend.vulcantech.tech
 
 # API Base URL - Used by frontend to connect to backend
-API_BASE_URL=https://backend.fxmail.ai
+API_BASE_URL=https://backend.vulcantech.tech
 
 # External HTTPS Base URL - Base URL for email links
-EXTERNAL_HTTPS_BASE_URL=https://fxmail.ai
+EXTERNAL_HTTPS_BASE_URL=https://vulcantech.tech
 
 # Backend Configuration
 PY_HOST=0.0.0.0
@@ -198,8 +197,8 @@ LOG_LEVEL=INFO
 
 # Security (CHANGE IN PRODUCTION!)
 SECRET_KEY=your-long-random-secret-key-here-change-this
-CORS_ORIGINS=https://frontend.fxmail.ai,https://backend.fxmail.ai,https://fxmail.ai,https://drive.fxmail.ai
-ALLOWED_HOSTS=frontend.fxmail.ai,backend.fxmail.ai,fxmail.ai,drive.fxmail.ai,localhost,127.0.0.1
+CORS_ORIGINS=https://frontend.vulcantech.tech,https://backend.vulcantech.tech,https://vulcantech.tech
+ALLOWED_HOSTS=frontend.vulcantech.tech,backend.vulcantech.tech,vulcantech.tech,localhost,127.0.0.1
 
 # Database (if using PostgreSQL)
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/flashdash_db
@@ -272,7 +271,7 @@ If you want server-side SSL certificates:
 sudo apt install certbot python3-certbot-nginx
 
 # Obtain certificates (if not using Cloudflare proxy)
-sudo certbot certonly --standalone -d frontend.fxmail.ai -d backend.fxmail.ai -d fxmail.ai -d drive.fxmail.ai
+sudo certbot certonly --standalone -d frontend.vulcantech.tech -d backend.vulcantech.tech -d vulcantech.tech
 
 # Update nginx configuration to use certificates
 # (See advanced configuration section)
@@ -284,16 +283,16 @@ sudo certbot certonly --standalone -d frontend.fxmail.ai -d backend.fxmail.ai -d
 
 ### Creating Email Addresses
 
-Email addresses are automatically generated when sending emails. Users can register with any email address ending in `@fxmail.ai`:
+Email addresses are automatically generated when sending emails. Users can register with any email address ending in `@vulcantech.tech`:
 
 **Example Flow**:
 
 1. **Register user**:
 ```bash
-curl -X POST https://backend.fxmail.ai/api/v1/auth/register \
+curl -X POST https://backend.vulcantech.tech/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "howie@fxmail.ai",
+    "email": "howie@vulcantech.tech",
     "password": "secure-password-123"
   }'
 ```
@@ -303,19 +302,19 @@ curl -X POST https://backend.fxmail.ai/api/v1/auth/register \
 curl -X POST https://backend.fxmail.ai/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "howie@fxmail.ai",
+    "email": "howie@vulcantech.tech",
     "password": "secure-password-123"
   }'
 ```
 
 3. **Send encrypted email**:
 ```bash
-curl -X POST https://fxmail.ai/api/v1/email/send \
+curl -X POST https://vulcantech.tech/api/v1/email/send \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
     "to": ["recipient@example.com"],
-    "subject": "Hello from howie@fxmail.ai",
+    "subject": "Hello from howie@vulcantech.tech",
     "body": "This is an encrypted email!",
     "passcode": "optional-passcode",
     "expires_in_hours": 168
@@ -326,8 +325,8 @@ curl -X POST https://fxmail.ai/api/v1/email/send \
 
 Email service is configured via environment variables:
 
-- `EMAIL_DOMAIN`: Email domain (default: `fxmail.ai`)
-- `EXTERNAL_HTTPS_BASE_URL`: Base URL for email links (default: `https://fxmail.ai`)
+- `EMAIL_DOMAIN`: Email domain (default: `vulcantech.tech`)
+- `EXTERNAL_HTTPS_BASE_URL`: Base URL for email links (default: `https://vulcantech.tech`)
 
 These are set in `docker-compose.yml` and can be overridden in `.env`.
 
@@ -343,7 +342,7 @@ Drive service supports encrypted file uploads with passcode protection:
 
 1. **Upload file**:
 ```bash
-curl -X POST https://drive.fxmail.ai/api/v1/drive/upload \
+curl -X POST https://backend.vulcantech.tech/api/v1/drive/upload \
   -H "Authorization: Bearer <access_token>" \
   -F "file=@document.pdf" \
   -F "passcode=secret123" \
@@ -352,13 +351,13 @@ curl -X POST https://drive.fxmail.ai/api/v1/drive/upload \
 
 2. **Get file info**:
 ```bash
-curl -X GET https://drive.fxmail.ai/api/v1/drive/file/{file_id} \
+curl -X GET https://backend.vulcantech.tech/api/v1/drive/file/{file_id} \
   -H "Authorization: Bearer <access_token>"
 ```
 
 3. **Unlock file** (if passcode protected):
 ```bash
-curl -X POST https://drive.fxmail.ai/api/v1/drive/file/{file_id}/unlock \
+curl -X POST https://backend.vulcantech.tech/api/v1/drive/file/{file_id}/unlock \
   -H "Content-Type: application/json" \
   -d '{
     "passcode": "secret123"
@@ -447,7 +446,7 @@ curl https://backend.fxmail.ai/bundles
 curl https://backend.fxmail.ai/health
 
 # Test email API
-curl -X POST https://backend.fxmail.ai/api/v1/auth/register \
+curl -X POST https://backend.vulcantech.tech/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@fxmail.ai","password":"test123456"}'
 

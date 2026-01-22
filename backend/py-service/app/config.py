@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     
     # API
     API_V1_PREFIX: str = "/api/v1"
-    ALLOWED_HOSTS: str = "localhost,127.0.0.1,os.fxmail.ai,drive.fxmail.ai"
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1,freedomos.vulcantech.co,backend.vulcantech.tech,vulcantech.tech"
     
     # Database
     DATABASE_URL: str = Field(
@@ -52,16 +52,16 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
-    # CORS - Allow localhost for development and production domains
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174,https://os.fxmail.ai,https://drive.fxmail.ai,https://fxmail.ai"
+    # CORS - Allow all origins (frontend can run on IP or any domain)
+    CORS_ORIGINS: str = "*"
     
     # Email (for encrypted email service)
     EMAIL_DOMAIN: str = Field(
-        default="fxmail.ai",
-        description="Email domain for generating email addresses",
+        default="vulcantech.tech",
+        description="Email domain for generating email addresses (e.g., howie@vulcantech.tech)",
     )
     EXTERNAL_HTTPS_BASE_URL: str = Field(
-        default="https://fxmail.ai",
+        default="https://vulcantech.tech",
         description="Base URL for external email links",
     )
     

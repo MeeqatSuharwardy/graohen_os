@@ -290,10 +290,32 @@ docker exec flashdash tail -f /var/log/nginx/error.log
 
 [Your License Here]
 
+## Bundle Management
+
+GrapheneOS builds should be placed in the `bundles/` directory following this structure:
+
+```
+bundles/
+└── {codename}/              # Device codename (e.g., panther)
+    └── {version}/           # Build version (e.g., 2025122500)
+        ├── image.zip        # Factory image
+        └── {codename}-install-{version}/  # Extracted install files
+            ├── boot.img
+            ├── bootloader-*.img
+            ├── radio-*.img
+            ├── super_*.img (1-14)
+            └── ...
+```
+
+**See [BUNDLE_STRUCTURE.md](./BUNDLE_STRUCTURE.md) for complete details.**
+
 ## Support
 
 For issues and questions:
-- **Documentation**: See [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) and [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)
+- **Documentation**: 
+  - [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) - Complete API reference
+  - [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Deployment instructions
+  - [BUNDLE_STRUCTURE.md](./BUNDLE_STRUCTURE.md) - Bundle structure guide
 - **Issues**: Open an issue on GitHub
 - **Email**: [Your Support Email]
 
