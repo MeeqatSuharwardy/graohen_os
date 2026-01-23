@@ -28,6 +28,8 @@ class UnlockAndFlashRequest(BaseModel):
     device_serial: str
     bundle_path: Optional[str] = None
     skip_unlock: bool = False
+    codename: Optional[str] = None  # Device codename from frontend
+    bootloader_unlocked: Optional[bool] = None  # Bootloader state from frontend
 
 
 @router.post("/execute")
@@ -190,13 +192,17 @@ async def unlock_and_flash(request: UnlockAndFlashRequest):
         # Find bundle path if not provided
         bundle_path = request.bundle_path
         
+        # Use codename from request if provided (from frontend), otherwise try to identify
+        codename = request.codename
+        
         if not bundle_path:
-            # Try to identify device to get codename
-            device_info = identify_device(request.device_serial)
+            # Try to identify device to get codename if not provided
+            if not codename:
+                device_info = identify_device(request.device_serial)
+                if device_info:
+                    codename = device_info["codename"]
             
-            if device_info:
-                # Device identified successfully - use its codename
-                codename = device_info["codename"]
+            if codename:
                 
                 # Find the latest bundle for this codename
                 bundle = get_bundle_for_codename(codename)

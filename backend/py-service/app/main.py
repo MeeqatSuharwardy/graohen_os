@@ -105,13 +105,13 @@ if HAS_SECURITY:
     #     exclude_paths=["/health", "/docs", "/openapi.json", "/redoc"],
     # )
 
-# CORS Middleware - Allow all origins (no restrictions)
+# CORS Middleware - Allow all origins including localhost for local development
 # Note: This allows all origins for development. For production, you may want to restrict this.
 # Note: allow_credentials must be False when allow_origins=["*"]
-logger.info("CORS: Allowing all origins (no restrictions)")
+logger.info("CORS: Allowing all origins (including localhost for local development)")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins - no restrictions
+    allow_origins=["*"],  # Allow all origins - includes localhost:5174, localhost:3000, etc.
     allow_credentials=False,  # Must be False when using allow_origins=["*"]
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
@@ -132,19 +132,8 @@ if HAS_API_ROUTES:
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 
-@app.options("/{full_path:path}")
-async def options_handler(full_path: str):
-    """Handle OPTIONS requests for CORS preflight - allows all origins"""
-    return JSONResponse(
-        content={},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Expose-Headers": "*",
-            "Access-Control-Max-Age": "3600",
-        }
-    )
+# OPTIONS handler removed - CORSMiddleware handles CORS preflight automatically
+# Removing this prevents duplicate CORS headers when Nginx also sets them
 
 
 @app.get("/")

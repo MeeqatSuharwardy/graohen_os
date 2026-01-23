@@ -1,12 +1,28 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from ..utils.tools import get_devices, identify_device, run_adb_command, run_fastboot_command
 from ..config import settings
 import logging
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class DeviceInfo(BaseModel):
+    """Device information from frontend"""
+    serial: str
+    state: str  # 'device', 'fastboot', 'unauthorized', 'offline'
+    codename: Optional[str] = None
+    device_name: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    bootloader_unlocked: Optional[bool] = None
+
+
+class DeviceListRequest(BaseModel):
+    """Request to register devices from frontend"""
+    devices: List[DeviceInfo]
 
 
 @router.get("")
@@ -62,6 +78,57 @@ async def list_devices():
         logger.error(f"Error listing devices: {e}", exc_info=True)
         # Return empty list on error rather than crashing
         return []
+
+
+@router.post("")
+@router.post("/")
+async def register_devices(request: DeviceListRequest):
+    """
+    Register devices from frontend (WebADB detection).
+    Frontend detects devices locally and sends device info to backend.
+    Backend stores device info and can use it for flashing operations.
+    """
+    try:
+        logger.info(f"Received {len(request.devices)} device(s) from frontend")
+        
+        registered_devices = []
+        for device_info in request.devices:
+            logger.info(f"Registering device: {device_info.serial} (state: {device_info.state}, codename: {device_info.codename})")
+            
+            # Try to identify device if codename not provided
+            codename = device_info.codename
+            if not codename:
+                try:
+                    identification = identify_device(device_info.serial)
+                    if identification:
+                        codename = identification.get("codename")
+                        logger.info(f"Identified device {device_info.serial} as {codename}")
+                except Exception as e:
+                    logger.warning(f"Could not identify device {device_info.serial}: {e}")
+            
+            registered_device = {
+                "serial": device_info.serial,
+                "state": device_info.state,
+                "codename": codename,
+                "device_name": device_info.device_name,
+                "manufacturer": device_info.manufacturer,
+                "model": device_info.model,
+                "bootloader_unlocked": device_info.bootloader_unlocked,
+            }
+            
+            registered_devices.append(registered_device)
+        
+        logger.info(f"Successfully registered {len(registered_devices)} device(s)")
+        
+        return {
+            "success": True,
+            "message": f"Registered {len(registered_devices)} device(s)",
+            "devices": registered_devices,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error registering devices: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{device_id}/identify")
