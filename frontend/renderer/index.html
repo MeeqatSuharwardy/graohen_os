@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://freedomos.vulcantech.co https://releases.grapheneos.org; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://freedomos.vulcantech.co https://releases.grapheneos.org; img-src 'self' data: https:;">
+  <title>FlashDash Client - Android OS Flashing</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>FlashDash</h1>
+      <p class="subtitle">Android OS Flashing Client</p>
+    </header>
+
+    <main>
+      <!-- Device Detection Section -->
+      <section class="card" id="device-section">
+        <h2>Device Detection</h2>
+        <div class="device-controls">
+          <button id="detect-btn" class="btn btn-primary">
+            <span class="btn-icon">🔍</span>
+            Detect Devices
+          </button>
+          <button id="refresh-btn" class="btn btn-secondary" style="display: none;">
+            Refresh
+          </button>
+        </div>
+        
+        <div id="device-status" class="status-message"></div>
+        
+        <div id="devices-list" class="devices-list"></div>
+      </section>
+
+      <!-- Flashing Section -->
+      <section class="card" id="flash-section" style="display: none;">
+        <h2>Flash Device</h2>
+        
+        <div class="selected-device-info" id="selected-device-info"></div>
+        
+        <div class="form-group">
+          <label for="version-select">OS Version</label>
+          <select id="version-select" class="form-control">
+            <option value="">Use latest available</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="download-bundle-first" style="width: auto; cursor: pointer;">
+            <span>Download bundle to local storage before flashing</span>
+          </label>
+          <div style="font-size: 0.85em; color: #888; margin-top: 4px;">
+            Bundle will be saved locally for offline use. Backend will use its own bundle if available.
+          </div>
+          <div id="download-status" style="margin-top: 10px; display: none;"></div>
+          <div id="download-progress" class="download-progress" style="display: none; margin-top: 10px;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <span id="progress-text">0%</span>
+          </div>
+          <div id="local-bundles-info" style="font-size: 0.85em; color: #666; margin-top: 8px; display: none;"></div>
+        </div>
+
+        <div class="warning-box" id="warning-box" style="display: none;">
+          <strong>⚠️ Warning:</strong>
+          <p id="warning-text"></p>
+        </div>
+
+        <div class="flash-controls">
+          <button id="flash-btn" class="btn btn-danger" disabled>
+            <span class="btn-icon">⚡</span>
+            Start Flashing
+          </button>
+          <button id="unlock-flash-btn" class="btn btn-danger" style="display: none;" disabled>
+            <span class="btn-icon">🔓</span>
+            Unlock Bootloader & Flash
+          </button>
+        </div>
+      </section>
+
+      <!-- Job Status Section -->
+      <section class="card" id="job-section" style="display: none;">
+        <h2>Flashing Progress</h2>
+        <div class="job-info">
+          <div class="job-id">Job ID: <span id="job-id"></span></div>
+          <div class="job-status" id="job-status">Initializing...</div>
+        </div>
+        
+        <div class="log-container">
+          <div id="log-output" class="log-output"></div>
+        </div>
+        
+        <button id="close-job-btn" class="btn btn-secondary" style="display: none;">
+          Close
+        </button>
+      </section>
+
+      <!-- Bundle Download Section -->
+      <section class="card" id="bundle-section" style="display: none;">
+        <h2>Bundle Download</h2>
+        <p>Download OS bundle ZIP files for manual flashing (optional)</p>
+        
+        <div class="form-group">
+          <label for="bundle-version-select">Bundle Version</label>
+          <select id="bundle-version-select" class="form-control">
+            <option value="">Select version...</option>
+          </select>
+        </div>
+
+        <div class="download-controls">
+          <button id="download-bundle-btn" class="btn btn-primary" disabled>
+            <span class="btn-icon">📥</span>
+            Download Bundle ZIP
+          </button>
+          <div id="download-progress" class="download-progress" style="display: none;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <span id="progress-text">0%</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- APK Management Section -->
+      <section class="card" id="apk-section">
+        <h2>APK Management</h2>
+        <p>Upload and install APKs from the server to connected devices</p>
+        
+        <div class="apk-controls">
+          <button id="refresh-apks-btn" class="btn btn-secondary">
+            <span class="btn-icon">🔄</span>
+            Refresh APK List
+          </button>
+          <button id="upload-apk-btn" class="btn btn-primary">
+            <span class="btn-icon">📤</span>
+            Upload APK
+          </button>
+        </div>
+
+        <div id="apk-status" class="status-message" style="display: none;"></div>
+
+        <div id="apks-list" class="apks-list">
+          <p style="color: #888; text-align: center; padding: 20px;">Click "Refresh APK List" to load available APKs</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Backend: <a href="https://freedomos.vulcantech.co" target="_blank">freedomos.vulcantech.co</a></p>
+      <p class="security-note">🔒 Flashing is performed securely by the backend. This client only detects devices and displays progress.</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

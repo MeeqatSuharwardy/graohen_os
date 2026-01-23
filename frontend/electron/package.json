@@ -1,0 +1,91 @@
+{
+  "name": "flashdash-client",
+  "version": "1.0.0",
+  "description": "FlashDash Client - Trusted Electron frontend for Android OS flashing",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:win:signed": "electron-builder --win --config.win.sign=sign.js",
+    "dist": "electron-builder --publish=never"
+  },
+  "keywords": [
+    "electron",
+    "android",
+    "flashing",
+    "grapheneos",
+    "pixel"
+  ],
+  "author": "VulcanTech",
+  "license": "MIT",
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "glob": "^13.0.0",
+    "form-data": "^4.0.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "co.vulcantech.flashdash",
+    "productName": "FlashDash",
+    "directories": {
+      "output": "../build"
+    },
+    "files": [
+      "**/*",
+      "!../renderer",
+      "!../public",
+      "../renderer/**/*",
+      "../public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../renderer",
+        "to": "renderer",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../assets/icon.png",
+      "publisherName": "VulcanTech",
+      "signingHashAlgorithms": ["sha256"],
+      "sign": "sign.js",
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "../assets/icon.png",
+      "uninstallerIcon": "../assets/icon.png",
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "shortcutName": "FlashDash"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "../assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "../assets/icon.png"
+    }
+  }
+}

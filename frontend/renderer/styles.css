@@ -1,0 +1,611 @@
+/**
+ * FlashDash Client - Stylesheet
+ * Modern, clean UI for device flashing interface
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: #000000;
+  min-height: 100vh;
+  padding: 0;
+  color: #e0e0e0;
+  margin: 0;
+}
+
+.container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 30px 20px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+header h1 {
+  font-size: 2.2em;
+  margin-bottom: 8px;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.subtitle {
+  font-size: 1em;
+  color: #a0a0a0;
+  font-weight: 400;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  background: white;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.card h2 {
+  color: #667eea;
+  margin-bottom: 20px;
+  font-size: 1.5em;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 10px;
+}
+
+/* Buttons */
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.5);
+}
+
+.btn-secondary {
+  background: #475569;
+  color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #334155;
+}
+
+.btn-danger {
+  background: #2563eb;
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #1d4ed8;
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.5);
+}
+
+.btn-small {
+  padding: 8px 16px;
+  font-size: 0.9em;
+}
+
+.btn-icon {
+  font-size: 1.2em;
+}
+
+/* Device Controls */
+.device-controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+/* Status Messages */
+.status-message {
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  display: none;
+}
+
+.status-message.info {
+  background: #1e3a5f;
+  color: #93c5fd;
+  border-left: 4px solid #2563eb;
+  display: block;
+}
+
+.status-message.success {
+  background: #064e3b;
+  color: #6ee7b7;
+  border-left: 4px solid #10b981;
+  display: block;
+}
+
+.status-message.error {
+  background: #7f1d1d;
+  color: #fca5a5;
+  border-left: 4px solid #ef4444;
+  display: block;
+}
+
+.status-message.warning {
+  background: #78350f;
+  color: #fcd34d;
+  border-left: 4px solid #f59e0b;
+  display: block;
+}
+
+/* Devices List */
+.devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.device-card {
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 16px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  background: #0f0f0f;
+}
+
+.device-card:hover {
+  border-color: #2563eb;
+  background: #1a1a2e;
+}
+
+.device-card.selected {
+  border-color: #2563eb;
+  background: #1e293b;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+}
+
+.device-card.error {
+  border-color: #ef4444;
+  background: #2a1a1a;
+}
+
+.device-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.device-name {
+  font-size: 1.2em;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.device-state {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.device-state.device {
+  background: #064e3b;
+  color: #6ee7b7;
+}
+
+.device-state.fastboot {
+  background: #78350f;
+  color: #fcd34d;
+}
+
+.device-state.offline {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
+.device-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 0.9em;
+  color: #666;
+}
+
+.device-detail-item {
+  display: flex;
+  gap: 8px;
+}
+
+.device-detail-label {
+  font-weight: 600;
+  color: #888;
+}
+
+.device-detail-value {
+  color: #e0e0e0;
+}
+
+/* Selected Device Info */
+.selected-device-info {
+  background: #1e293b;
+  border-left: 3px solid #2563eb;
+  padding: 14px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 0.9em;
+  line-height: 1.6;
+  color: #e0e0e0;
+}
+
+/* Form Controls */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.form-control {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  font-size: 0.95em;
+  transition: border-color 0.2s ease;
+  background: #0f0f0f;
+  color: #e0e0e0;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+}
+
+.form-group input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #2563eb;
+}
+
+#download-status {
+  font-size: 0.9em;
+  padding: 10px;
+  border-radius: 6px;
+  background: #1e293b;
+  border: 1px solid #333;
+}
+
+#download-status div {
+  margin: 4px 0;
+}
+
+.form-group .btn-small {
+  margin-top: 10px;
+}
+
+/* Warning Box */
+.warning-box {
+  background: #78350f;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 20px;
+}
+
+.warning-box strong {
+  color: #fcd34d;
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.9em;
+}
+
+.warning-box p {
+  color: #fcd34d;
+  margin: 0;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+/* Flash Controls */
+.flash-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Job Status */
+.job-info {
+  margin-bottom: 20px;
+}
+
+.job-id {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+.job-status {
+  font-size: 1.1em;
+  font-weight: 600;
+  padding: 10px;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #e0e0e0;
+}
+
+.job-status.running {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+.job-status.success {
+  background: #064e3b;
+  color: #6ee7b7;
+}
+
+.job-status.error {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
+/* Log Output */
+.log-container {
+  background: #1e1e1e;
+  border-radius: 6px;
+  padding: 15px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85em;
+}
+
+.log-output {
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.log-output .log-line {
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+
+.log-output .log-line.error {
+  color: #f48771;
+}
+
+.log-output .log-line.success {
+  color: #89d185;
+}
+
+.log-output .log-line.info {
+  color: #4ec9b0;
+}
+
+.log-output .log-line.warning {
+  color: #dcdcaa;
+}
+
+/* Download Progress */
+.download-progress {
+  margin-top: 15px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 24px;
+  background: #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #2563eb;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+#progress-text {
+  font-size: 0.9em;
+  color: #888;
+  font-weight: 600;
+}
+
+.progress-bar {
+  background: #1a1a1a;
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  color: #888;
+  margin-top: 40px;
+  padding: 20px;
+  font-size: 0.85em;
+}
+
+footer a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+footer a:hover {
+  text-decoration: underline;
+  color: #93c5fd;
+}
+
+.security-note {
+  margin-top: 8px;
+  font-size: 0.85em;
+  color: #666;
+}
+
+/* Loading Spinner */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* APK Management Styles */
+.apk-controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.apks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.apk-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 16px;
+  transition: all 0.2s ease;
+}
+
+.apk-card:hover {
+  border-color: #444;
+  background: #1f1f1f;
+}
+
+.apk-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.apk-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #e0e0e0;
+  font-size: 1em;
+}
+
+.apk-icon {
+  font-size: 1.2em;
+}
+
+.apk-size {
+  color: #888;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.apk-details {
+  margin-bottom: 12px;
+}
+
+.apk-detail-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.9em;
+}
+
+.apk-detail-label {
+  color: #888;
+  font-weight: 500;
+}
+
+.apk-detail-value {
+  color: #b0b0b0;
+}
+
+.apk-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.btn-sm {
+  padding: 8px 16px;
+  font-size: 0.9em;
+}
+
+.btn-sm .btn-icon {
+  font-size: 0.9em;
+}
+
+.install-apk-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.install-apk-btn:disabled:hover {
+  background: #2563eb;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  header h1 {
+    font-size: 2em;
+  }
+  
+  .card {
+    padding: 15px;
+  }
+  
+  .device-details {
+    grid-template-columns: 1fr;
+  }
+
+  .apk-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}

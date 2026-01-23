@@ -5,9 +5,9 @@ Complete API reference for FlashDash platform including GrapheneOS flashing, enc
 ## Base URLs
 
 - **Development**: `http://localhost:8000`
-- **Production Backend**: `https://backend.fxmail.ai`
-- **Production Email**: `https://fxmail.ai`
-- **Production Drive**: `https://drive.fxmail.ai`
+- **Production Backend**: `https://freedomos.vulcantech.co`
+- **Production Email**: `https://vulcantech.tech`
+- **Production Drive**: `https://freedomos.vulcantech.co`
 
 ## Authentication
 
@@ -37,7 +37,7 @@ Create a new user account with email and password.
 **Request Body**:
 ```json
 {
-  "email": "howie@fxmail.ai",
+  "email": "howie@vulcantech.tech",
   "password": "secure-password-123",
   "full_name": "Howie User",
   "device_id": "optional-device-id"
@@ -70,7 +70,7 @@ Authenticate and get access tokens.
 **Request Body**:
 ```json
 {
-  "email": "howie@fxmail.ai",
+  "email": "howie@vulcantech.tech",
   "password": "secure-password-123",
   "device_id": "optional-device-id"
 }
@@ -169,8 +169,8 @@ Create and send an encrypted email. Returns a secure link for recipients.
 ```json
 {
   "email_id": "abc123xyz",
-  "email_address": "abc123xyz@fxmail.ai",
-  "secure_link": "https://fxmail.ai/email/abc123xyz",
+  "email_address": "abc123xyz@vulcantech.tech",
+  "secure_link": "https://vulcantech.tech/email/abc123xyz",
   "expires_at": "2025-01-23T12:00:00Z",
   "encryption_mode": "authenticated"
 }
@@ -318,10 +318,10 @@ Get file information and signed download URL.
   "size": 1048576,
   "content_type": "application/pdf",
   "passcode_protected": false,
-  "owner_email": "howie@fxmail.ai",
+  "owner_email": "howie@vulcantech.tech",
   "expires_at": "2025-01-23T12:00:00Z",
   "created_at": "2025-01-16T12:00:00Z",
-  "signed_url": "https://drive.fxmail.ai/api/v1/drive/download/xyz789abc?token=...",
+  "signed_url": "https://freedomos.vulcantech.co/api/v1/drive/download/xyz789abc?token=...",
   "signed_url_expires_at": "2025-01-16T13:00:00Z"
 }
 ```
@@ -366,7 +366,7 @@ Unlock a passcode-protected file and get signed download URL.
 ```json
 {
   "file_id": "xyz789abc",
-  "signed_url": "https://drive.fxmail.ai/api/v1/drive/download/xyz789abc?token=...",
+  "signed_url": "https://freedomos.vulcantech.co/api/v1/drive/download/xyz789abc?token=...",
   "signed_url_expires_at": "2025-01-16T13:00:00Z",
   "unlocked_at": "2025-01-16T12:00:00Z"
 }
@@ -438,9 +438,11 @@ Check if ADB and Fastboot are available.
 
 ### List Devices
 
-List all connected devices (ADB and Fastboot).
+List all connected devices (ADB and Fastboot). Can also register devices from frontend.
 
-**Endpoint**: `GET /devices`
+**Endpoint**: `GET /devices` or `POST /devices`
+
+**GET Request**: List devices detected by backend
 
 **Response** (200 OK):
 ```json
@@ -452,6 +454,44 @@ List all connected devices (ADB and Fastboot).
     "device_name": "Pixel 7"
   }
 ]
+```
+
+**POST Request**: Register devices detected by frontend (WebADB)
+
+**Request Body**:
+```json
+{
+  "devices": [
+    {
+      "serial": "ABC123XYZ",
+      "state": "device",
+      "codename": "panther",
+      "device_name": "Pixel 7",
+      "manufacturer": "Google",
+      "model": "Pixel 7",
+      "bootloader_unlocked": false
+    }
+  ]
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "message": "Registered 1 device(s)",
+  "devices": [
+    {
+      "serial": "ABC123XYZ",
+      "state": "device",
+      "codename": "panther",
+      "device_name": "Pixel 7",
+      "manufacturer": "Google",
+      "model": "Pixel 7",
+      "bootloader_unlocked": false
+    }
+  ]
+}
 ```
 
 ---
@@ -499,7 +539,182 @@ Get available bundles for a device codename.
 {
   "codename": "panther",
   "version": "2025122500",
-  "path": "/app/bundles/panther/2025122500"
+  "path": "/root/graohen_os/bundles/panther/2025122500",
+  "deviceName": "Pixel 7",
+  "downloadUrl": "https://releases.grapheneos.org/panther-factory-2025122500.zip",
+  "metadata": {
+    "codename": "panther",
+    "version": "2025122500",
+    "files": {
+      "imageZip": "image.zip",
+      "sha256": "image.zip.sha256",
+      "sig": "image.zip.sig",
+      "flashSh": "flash-all.sh",
+      "flashBat": "flash-all.bat"
+    }
+  }
+}
+```
+
+---
+
+### Index All Bundles
+
+Get all available bundles indexed by codename.
+
+**Endpoint**: `POST /bundles/index`
+
+**Response** (200 OK):
+```json
+{
+  "panther": [
+    {
+      "codename": "panther",
+      "version": "2025122500",
+      "path": "/root/graohen_os/bundles/panther/2025122500",
+      ...
+    }
+  ]
+}
+```
+
+---
+
+### Download Bundle ZIP
+
+Download the complete bundle ZIP file from the bundles folder.
+
+**Endpoint**: `GET /bundles/releases/{codename}/{version}/download`
+
+**Parameters**:
+- `codename` (path): Device codename (e.g., `panther`)
+- `version` (path): Bundle version (e.g., `2025122500`)
+
+**Response**: 
+- Returns the ZIP file as a download
+- Content-Type: `application/zip`
+- Filename: `{codename}-factory-{version}.zip`
+
+**Example**:
+```bash
+curl -O https://freedomos.vulcantech.co/bundles/releases/panther/2025122500/download
+```
+
+**File Lookup Order**:
+1. `bundles/{codename}/{version}/image.zip`
+2. `bundles/{codename}/{version}/{codename}-factory-{version}.zip`
+3. Bundle path itself if it's a ZIP file
+
+---
+
+### Download Specific File from Bundle
+
+Download a specific file from a bundle (e.g., `boot.img`, `system.img`, `flash-all.sh`).
+
+**Endpoint**: `GET /bundles/releases/{codename}/{version}/file/{filename}`
+
+**Parameters**:
+- `codename` (path): Device codename
+- `version` (path): Bundle version
+- `filename` (path): Name of the file to download
+
+**Response**:
+- Returns the file as a download
+- Content-Type determined by file extension
+
+**Example**:
+```bash
+# Download boot.img
+curl -O https://freedomos.vulcantech.co/bundles/releases/panther/2025122500/file/panther-install-2025122500/boot.img
+
+# Download flash-all.sh
+curl -O https://freedomos.vulcantech.co/bundles/releases/panther/2025122500/file/flash-all.sh
+```
+
+**Security**:
+- Prevents directory traversal (`..`, `/`, `\` are blocked)
+- Ensures file is within bundle directory
+
+---
+
+### List Files in Bundle
+
+List all files available in a bundle directory.
+
+**Endpoint**: `GET /bundles/releases/{codename}/{version}/list`
+
+**Parameters**:
+- `codename` (path): Device codename
+- `version` (path): Bundle version
+
+**Response** (200 OK):
+```json
+{
+  "codename": "panther",
+  "version": "2025122500",
+  "bundle_path": "/root/graohen_os/bundles/panther/2025122500",
+  "files": [
+    {
+      "name": "image.zip",
+      "size": 2147483648,
+      "path": "/bundles/releases/panther/2025122500/file/image.zip"
+    },
+    {
+      "name": "flash-all.sh",
+      "size": 2048,
+      "path": "/bundles/releases/panther/2025122500/file/flash-all.sh"
+    },
+    {
+      "name": "panther-install-2025122500/boot.img",
+      "size": 67108864,
+      "path": "/bundles/releases/panther/2025122500/file/panther-install-2025122500/boot.img"
+    }
+  ],
+  "total_files": 30
+}
+```
+
+**Features**:
+- Lists all files in bundle directory (recursive)
+- Includes subdirectories
+- Provides download paths for each file
+- Shows file sizes
+
+---
+
+### Download Bundle from GrapheneOS (External)
+
+Download a bundle from GrapheneOS releases (external download).
+
+**Endpoint**: `POST /bundles/download`
+
+**Request Body**:
+```json
+{
+  "codename": "panther",
+  "version": "2025122500"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "download_id": "panther-2025122500",
+  "status": "started",
+  "message": "Download started"
+}
+```
+
+**Status Check**: `GET /bundles/download/{download_id}/status`
+
+**Response** (200 OK):
+```json
+{
+  "status": "downloading",
+  "progress": 45.5,
+  "downloaded": 977272832,
+  "total": 2147483648,
+  "error": null
 }
 ```
 
@@ -515,7 +730,7 @@ Start a flash operation.
 ```json
 {
   "device_serial": "ABC123XYZ",
-  "bundle_path": "/app/bundles/panther/2025122500",
+  "bundle_path": "/root/graohen_os/bundles/panther/2025122500",
   "dry_run": false,
   "confirmation_token": "optional-token"
 }
@@ -529,6 +744,91 @@ Start a flash operation.
   "message": "Flash job started"
 }
 ```
+
+---
+
+### Device Flash (Frontend-Initiated)
+
+Start flash process from frontend-detected device. Frontend sends device info (detected via WebADB) and backend starts flashing automatically.
+
+**Endpoint**: `POST /flash/device-flash`
+
+**Request Body**:
+```json
+{
+  "serial": "ABC123XYZ",
+  "codename": "panther",
+  "state": "fastboot",
+  "bootloader_unlocked": false,
+  "version": "2025122500",
+  "skip_unlock": null
+}
+```
+
+**Field Descriptions**:
+- `serial` (required): Device serial number
+- `codename` (required): Device codename (e.g., `panther`)
+- `state` (required): Device state (`device` or `fastboot`)
+- `bootloader_unlocked` (optional): Bootloader unlock status (auto-determines `skip_unlock`)
+- `version` (optional): Bundle version (defaults to latest)
+- `skip_unlock` (optional): Skip bootloader unlock (auto-determined from `bootloader_unlocked` if not provided)
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "job_id": "uuid-here",
+  "message": "Unlock and flash process started"
+}
+```
+
+**Process**:
+1. Finds bundle for codename (and version if provided)
+2. Determines `skip_unlock` from `bootloader_unlocked` flag
+3. Starts flash job in background
+4. Returns `job_id` for status tracking
+
+---
+
+### Unlock and Flash
+
+Unlock bootloader and flash GrapheneOS in one operation. Enhanced to accept device info from frontend.
+
+**Endpoint**: `POST /flash/unlock-and-flash`
+
+**Request Body**:
+```json
+{
+  "device_serial": "ABC123XYZ",
+  "bundle_path": "/root/graohen_os/bundles/panther/2025122500",
+  "skip_unlock": false,
+  "codename": "panther",
+  "bootloader_unlocked": false
+}
+```
+
+**Field Descriptions**:
+- `device_serial` (required): Device serial number
+- `bundle_path` (optional): Path to bundle (auto-detected if not provided)
+- `skip_unlock` (optional): Skip bootloader unlock (auto-determined from `bootloader_unlocked` if not provided)
+- `codename` (optional): Device codename from frontend (skips device identification if provided)
+- `bootloader_unlocked` (optional): Bootloader state from frontend (auto-determines `skip_unlock`)
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "job_id": "uuid-here",
+  "message": "Unlock and flash process started"
+}
+```
+
+**Process**:
+1. Uses codename from request if provided (skips device identification)
+2. Uses bootloader_unlocked flag to determine skip_unlock
+3. Finds bundle for codename
+4. Starts flash job in background
+5. Returns `job_id` for status tracking
 
 ---
 
@@ -639,6 +939,48 @@ Upload an APK file (HTTP Basic Auth required).
 
 ---
 
+### Download APK
+
+Download an APK file from the server.
+
+**Endpoint**: `GET /apks/download/{filename}`
+
+**Path Parameters**:
+- `filename`: Name of the APK file to download (must end with `.apk`)
+
+**Example**:
+```
+GET /apks/download/my-app.apk
+```
+
+**Response** (200 OK):
+- Content-Type: `application/vnd.android.package-archive`
+- File download with the APK file
+
+**Error Responses**:
+- `400 Bad Request`: Invalid filename (contains `..`, `/`, `\`, or doesn't end with `.apk`)
+- `404 Not Found`: APK file not found
+- `500 Internal Server Error`: Server error during download
+
+**Security**:
+- Filename validation prevents directory traversal attacks
+- Only files with `.apk` extension can be downloaded
+- File must exist in the APK storage directory
+
+**Example Usage**:
+```bash
+# Using cURL
+curl -O https://freedomos.vulcantech.co/apks/download/my-app.apk
+
+# Using wget
+wget https://freedomos.vulcantech.co/apks/download/my-app.apk
+
+# Using browser
+# Navigate to: https://freedomos.vulcantech.co/apks/download/my-app.apk
+```
+
+---
+
 ### Install APK
 
 Install APK on connected device.
@@ -661,6 +1003,8 @@ Install APK on connected device.
   "device_serial": "ABC123XYZ"
 }
 ```
+
+**Note**: This endpoint requires the device to be connected to the backend server. For Electron app, use local ADB installation instead.
 
 ---
 
@@ -708,12 +1052,11 @@ X-RateLimit-Reset: 1642248000
 
 ## CORS
 
-CORS is configured to allow requests from:
-- `https://frontend.fxmail.ai`
-- `https://backend.fxmail.ai`
-- `https://fxmail.ai`
-- `https://drive.fxmail.ai`
+CORS is configured to allow requests from all origins (`*`):
+- `https://freedomos.vulcantech.co`
+- `https://vulcantech.tech`
 - `http://localhost:*` (development)
+- All other origins (for web flasher compatibility)
 
 ---
 
@@ -732,23 +1075,23 @@ Some endpoints use Server-Sent Events (SSE) for real-time updates:
 
 ```bash
 # 1. Register user
-curl -X POST https://backend.fxmail.ai/api/v1/auth/register \
+curl -X POST https://freedomos.vulcantech.co/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "howie@fxmail.ai",
+    "email": "howie@vulcantech.tech",
     "password": "secure123456"
   }'
 
 # 2. Login
-curl -X POST https://backend.fxmail.ai/api/v1/auth/login \
+curl -X POST https://freedomos.vulcantech.co/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "howie@fxmail.ai",
+    "email": "howie@vulcantech.tech",
     "password": "secure123456"
   }'
 
 # 3. Send encrypted email
-curl -X POST https://fxmail.ai/api/v1/email/send \
+curl -X POST https://vulcantech.tech/api/v1/email/send \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -759,7 +1102,7 @@ curl -X POST https://fxmail.ai/api/v1/email/send \
   }'
 
 # 4. Unlock email (recipient)
-curl -X POST https://fxmail.ai/api/v1/email/{email_id}/unlock \
+curl -X POST https://vulcantech.tech/api/v1/email/{email_id}/unlock \
   -H "Content-Type: application/json" \
   -d '{
     "passcode": "secret123"
@@ -770,26 +1113,75 @@ curl -X POST https://fxmail.ai/api/v1/email/{email_id}/unlock \
 
 ```bash
 # 1. Upload file
-curl -X POST https://drive.fxmail.ai/api/v1/drive/upload \
+curl -X POST https://freedomos.vulcantech.co/api/v1/drive/upload \
   -H "Authorization: Bearer <access_token>" \
   -F "file=@document.pdf" \
   -F "passcode=secret123" \
   -F "expires_in_hours=168"
 
 # 2. Get file info
-curl -X GET https://drive.fxmail.ai/api/v1/drive/file/{file_id} \
+curl -X GET https://freedomos.vulcantech.co/api/v1/drive/file/{file_id} \
   -H "Authorization: Bearer <access_token>"
 
 # 3. Unlock file (if passcode protected)
-curl -X POST https://drive.fxmail.ai/api/v1/drive/file/{file_id}/unlock \
+curl -X POST https://freedomos.vulcantech.co/api/v1/drive/file/{file_id}/unlock \
   -H "Content-Type: application/json" \
   -d '{
     "passcode": "secret123"
   }'
 
 # 4. Download file
-curl -X GET "https://drive.fxmail.ai/api/v1/drive/download/{file_id}?token=<signed_token>" \
+curl -X GET "https://freedomos.vulcantech.co/api/v1/drive/download/{file_id}?token=<signed_token>" \
   -o downloaded_file.pdf
+```
+
+### Complete Flashing Flow (Frontend-Initiated)
+
+```bash
+# 1. Register device from frontend (WebADB detection)
+curl -X POST https://freedomos.vulcantech.co/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "devices": [{
+      "serial": "ABC123XYZ",
+      "state": "fastboot",
+      "codename": "panther",
+      "bootloader_unlocked": false
+    }]
+  }'
+
+# 2. Start flash from frontend device
+curl -X POST https://freedomos.vulcantech.co/flash/device-flash \
+  -H "Content-Type: application/json" \
+  -d '{
+    "serial": "ABC123XYZ",
+    "codename": "panther",
+    "state": "fastboot",
+    "bootloader_unlocked": false,
+    "version": "2025122500"
+  }'
+
+# 3. Poll flash job status
+curl -X GET https://freedomos.vulcantech.co/flash/jobs/{job_id}
+
+# 4. Stream flash logs (SSE)
+curl -N https://freedomos.vulcantech.co/flash/jobs/{job_id}/stream
+```
+
+### Bundle Download Flow
+
+```bash
+# 1. Get bundle info
+curl -X GET https://freedomos.vulcantech.co/bundles/for/panther
+
+# 2. List files in bundle
+curl -X GET https://freedomos.vulcantech.co/bundles/releases/panther/2025122500/list
+
+# 3. Download complete bundle ZIP
+curl -O https://freedomos.vulcantech.co/bundles/releases/panther/2025122500/download
+
+# 4. Download specific file
+curl -O https://freedomos.vulcantech.co/bundles/releases/panther/2025122500/file/panther-install-2025122500/boot.img
 ```
 
 ---
@@ -799,6 +1191,45 @@ curl -X GET "https://drive.fxmail.ai/api/v1/drive/download/{file_id}?token=<sign
 Current API version: `1.0.0`
 
 For the latest API documentation, visit `/docs` (Swagger UI) when `DEBUG=true`.
+
+---
+
+## API Endpoints Summary
+
+### Device Management
+- `GET /devices` - List devices (backend detection)
+- `POST /devices` - Register devices from frontend (WebADB)
+- `GET /devices/{device_id}/identify` - Identify device codename
+- `POST /devices/{device_id}/reboot/bootloader` - Reboot to bootloader
+
+### Bundle Management
+- `POST /bundles/index` - Index all available bundles
+- `GET /bundles/for/{codename}` - Get bundle for codename
+- `GET /bundles/releases/{codename}/{version}/download` - Download bundle ZIP
+- `GET /bundles/releases/{codename}/{version}/file/{filename}` - Download specific file
+- `GET /bundles/releases/{codename}/{version}/list` - List all files in bundle
+- `POST /bundles/download` - Download bundle from GrapheneOS (external)
+- `GET /bundles/download/{download_id}/status` - Check download status
+
+### Flashing Operations
+- `POST /flash/execute` - Execute flash directly
+- `POST /flash/device-flash` - Start flash from frontend device (NEW)
+- `POST /flash/unlock-and-flash` - Unlock and flash (enhanced with frontend info)
+- `GET /flash/jobs/{job_id}` - Get flash job status
+- `GET /flash/jobs/{job_id}/stream` - Stream flash logs (SSE)
+- `POST /flash/jobs/{job_id}/cancel` - Cancel flash job
+
+### Authentication & Services
+- `POST /api/v1/auth/register` - Register user
+- `POST /api/v1/auth/login` - Login
+- `POST /api/v1/auth/refresh` - Refresh token
+- `POST /api/v1/auth/logout` - Logout
+- `POST /api/v1/email/send` - Send encrypted email
+- `GET /api/v1/email/{email_id}` - Get email
+- `POST /api/v1/email/{email_id}/unlock` - Unlock email
+- `POST /api/v1/drive/upload` - Upload file
+- `GET /api/v1/drive/file/{file_id}` - Get file info
+- `GET /api/v1/drive/download/{file_id}` - Download file
 
 ---
 
