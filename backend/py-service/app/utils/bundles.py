@@ -188,13 +188,20 @@ def get_bundle_info(codename: str, version: str, bundle_path: Path) -> Optional[
     return None
 
 
-def get_bundle_for_codename(codename: str) -> Optional[Dict[str, Any]]:
-    """Get the newest bundle for a codename - searches multiple locations"""
+def get_bundle_for_codename(codename: str, version: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Get bundle for a codename - optionally filter by version"""
     # First try indexing
     bundles = index_bundles()
     codename_bundles = bundles.get(codename, [])
     
     if codename_bundles:
+        if version:
+            # Find specific version
+            for bundle in codename_bundles:
+                if bundle.get("version") == version:
+                    return bundle
+            # Version not found, return None
+            return None
         # Return the newest bundle (first in sorted list)
         return codename_bundles[0]
     
