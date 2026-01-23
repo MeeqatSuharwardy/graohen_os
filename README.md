@@ -1,354 +1,516 @@
-# FlashDash - Complete Platform
+# FlashDash - GrapheneOS Installer Demo
 
 A comprehensive platform for GrapheneOS installation, encrypted email service, and secure file storage.
 
-## Overview
+## 🚀 Quick Start Demo
 
-FlashDash provides:
-- **GrapheneOS Flashing**: Web-based and desktop tools for installing GrapheneOS on Pixel devices
-- **Encrypted Email Service**: End-to-end encrypted email with support for custom email addresses (e.g., `howie@fxmail.ai`)
-- **Secure Drive**: Encrypted file storage and sharing
-- **RESTful API**: Complete API for all services
-
-## Architecture
-
-### Domains
-
-- **frontend.fxmail.ai** - Main web application (React frontend)
-- **backend.fxmail.ai** - API server (FastAPI backend)
-- **fxmail.ai** - Email service (main domain for email addresses, e.g., howie@fxmail.ai)
-- **drive.fxmail.ai** - Drive/file storage service
-
-### Technology Stack
-
-- **Backend**: Python 3.11, FastAPI, PostgreSQL, Redis
-- **Frontend**: React, TypeScript, Vite
-- **Infrastructure**: Docker, Nginx
-- **Security**: End-to-end encryption, JWT authentication
-
-## Quick Start
+Get FlashDash running locally in minutes!
 
 ### Prerequisites
 
-- Docker 20.10+
-- Docker Compose 2.0+
-- Ubuntu 20.04+ VPS (for production)
-- Domain names configured (for production)
+#### Windows
+- **Python 3.11+**: Download from [python.org](https://www.python.org/downloads/)
+- **Node.js 20+**: Download from [nodejs.org](https://nodejs.org/)
+- **pnpm**: Install via `npm install -g pnpm`
+- **ADB & Fastboot**: Download [Android Platform Tools](https://developer.android.com/tools/releases/platform-tools) and add to PATH
 
-### Local Development
+#### macOS/Linux
+- **Python 3.11+**: `brew install python@3.11` (macOS) or `sudo apt-get install python3.11` (Linux)
+- **Node.js 20+**: `brew install node` (macOS) or use [nvm](https://github.com/nvm-sh/nvm)
+- **pnpm**: `npm install -g pnpm`
+- **ADB & Fastboot**: `brew install android-platform-tools` (macOS) or `sudo apt-get install android-tools-adb android-tools-fastboot` (Linux)
 
-**Quick Start:**
+## 📦 Installation & Setup
+
+### Step 1: Clone Repository
+
 ```bash
-# Clone repository
 git clone <repository-url>
 cd graohen_os
-
-# Start services with Docker
-docker-compose up -d
-
-# Access services:
-# - Frontend: http://localhost:81
-# - Backend API: http://localhost:8000
-# - API Docs: http://localhost:8000/docs
-# - Health Check: http://localhost:8000/health
 ```
 
-**Manual Setup (Backend + Frontend separately):**
-```bash
-# Backend
-cd backend/py-service
-python3.11 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+### Step 2: Backend Setup
 
-# Frontend (in new terminal)
-cd frontend
-pnpm install
-pnpm dev:web  # Runs on http://localhost:5173
-```
+#### Windows (PowerShell)
+```powershell
+# Navigate to backend
+cd backend\py-service
 
-See [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md) or [RUN_LOCALLY.md](./RUN_LOCALLY.md) for complete local setup guide.
-
-### Production Deployment
-
-See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for complete deployment instructions.
-
-## Features
-
-### GrapheneOS Flashing
-
-- Web-based flasher (browser/WebUSB)
-- Desktop Electron app
-- Python CLI tool
-- Support for all Pixel devices
-- Automatic build management
-
-### Email Service
-
-- Create custom email addresses (e.g., `howie@fxmail.ai`)
-- End-to-end encryption
-- Passcode protection
-- Self-destruct emails
-- Expiring access links
-
-### Drive Service
-
-- Encrypted file uploads
-- Secure file sharing
-- Passcode protection
-- Expiring links
-- Large file support (up to 500MB)
-
-## API Documentation
-
-Complete API documentation is available at:
-- **Swagger UI**: `http://localhost:8000/docs` (development)
-- **API Reference**: See [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)
-
-## Project Structure
-
-```
-graohen_os/
-├── backend/
-│   ├── py-service/          # FastAPI backend
-│   │   ├── app/
-│   │   │   ├── api/v1/      # API endpoints
-│   │   │   ├── core/        # Core utilities
-│   │   │   ├── services/    # Business logic
-│   │   │   └── routes/      # Legacy routes
-│   │   └── requirements.txt
-│   └── flasher.py           # CLI flasher
-├── frontend/
-│   ├── packages/            # Shared packages
-│   │   ├── web/            # Main web app
-│   │   ├── desktop/        # Electron app
-│   │   ├── flasher/        # Flashing engine
-│   │   └── flasher-ui/     # UI components
-│   └── apps/
-│       └── web-flasher/     # Web flasher app
-├── docker/
-│   ├── nginx.conf          # Nginx main config
-│   ├── nginx-site.conf     # Domain routing
-│   └── start.sh           # Startup script
-├── Dockerfile              # Multi-stage build
-├── docker-compose.yml      # Docker orchestration
-├── README.md              # This file
-├── API_DOCUMENTATION.md   # Complete API reference
-└── DEPLOYMENT_GUIDE.md    # Deployment instructions
-```
-
-## Configuration
-
-### Environment Variables
-
-Key environment variables (see `docker-compose.yml`):
-
-- `FRONTEND_DOMAIN` - Frontend domain (default: `frontend.fxmail.ai`)
-- `BACKEND_DOMAIN` - Backend domain (default: `backend.fxmail.ai`)
-- `EMAIL_DOMAIN` - Email domain (default: `fxmail.ai`)
-- `DRIVE_DOMAIN` - Drive domain (default: `drive.fxmail.ai`)
-- `API_BASE_URL` - API base URL
-- `EXTERNAL_HTTPS_BASE_URL` - External HTTPS base URL for email links
-- `CORS_ORIGINS` - Allowed CORS origins
-- `ALLOWED_HOSTS` - Allowed host headers
-
-### Backend Configuration
-
-Backend configuration is in `backend/py-service/app/config.py` and can be overridden via environment variables or `.env` file.
-
-Key settings:
-- `EMAIL_DOMAIN` - Email domain for generating addresses
-- `EXTERNAL_HTTPS_BASE_URL` - Base URL for email links
-- `SECRET_KEY` - JWT secret key (change in production!)
-- `DATABASE_URL` - PostgreSQL connection string
-- `REDIS_URL` - Redis connection string
-
-## Services
-
-### Email Service
-
-Create encrypted emails with custom addresses:
-
-```bash
-# Register user
-POST /api/v1/auth/register
-{
-  "email": "howie@fxmail.ai",
-  "password": "secure-password"
-}
-
-# Send encrypted email
-POST /api/v1/email/send
-Authorization: Bearer <token>
-{
-  "to": ["recipient@example.com"],
-  "subject": "Encrypted message",
-  "body": "Message content",
-  "passcode": "optional-passcode",
-  "expires_in_hours": 168
-}
-```
-
-### Drive Service
-
-Upload and share encrypted files:
-
-```bash
-# Upload file
-POST /api/v1/drive/upload
-Authorization: Bearer <token>
-FormData:
-  - file: <file>
-  - passcode: "optional-passcode"
-  - expires_in_hours: 168
-
-# Get file info
-GET /api/v1/drive/file/{file_id}
-Authorization: Bearer <token>
-```
-
-### GrapheneOS Flashing
-
-Flash GrapheneOS to Pixel devices:
-
-```bash
-# List devices
-GET /devices
-
-# List bundles
-GET /bundles/for/{codename}
-
-# Start flash job
-POST /flash/execute
-{
-  "device_serial": "ABC123XYZ",
-  "bundle_path": "/path/to/bundle"
-}
-```
-
-## Development
-
-### Backend Development
-
-```bash
-cd backend/py-service
+# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or
-venv\Scripts\activate  # Windows
+
+# Activate virtual environment
+.\venv\Scripts\Activate.ps1
+
+# If activation fails, run:
+# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# Install dependencies
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+
+# Create .env file
+Copy-Item env.example .env
+
+# Edit .env (optional - defaults work for local)
+# Notepad .env
 ```
 
-### Frontend Development
-
+#### macOS/Linux
 ```bash
-cd frontend
-pnpm install
-pnpm dev:web  # Main web app
-pnpm dev:desktop  # Electron app
-pnpm dev:web-flasher  # Web flasher
+# Navigate to backend
+cd backend/py-service
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Create .env file
+cp env.example .env
 ```
 
-## Testing
+### Step 3: Frontend Setup
 
-### API Testing
+#### Windows (PowerShell)
+```powershell
+# From project root
+cd ..
 
+# Install dependencies
+pnpm install
+
+# Create frontend .env file
+New-Item -Path "frontend\packages\desktop\.env" -ItemType File -Force
+Add-Content -Path "frontend\packages\desktop\.env" -Value "VITE_API_BASE_URL=http://localhost:8000"
+```
+
+#### macOS/Linux
+```bash
+# From project root
+cd ..
+
+# Install dependencies
+pnpm install
+
+# Create frontend .env file
+echo "VITE_API_BASE_URL=http://localhost:8000" > frontend/packages/desktop/.env
+```
+
+## 🎯 Running the Demo
+
+### Terminal 1: Start Backend
+
+#### Windows (PowerShell)
+```powershell
+# Navigate to backend
+cd backend\py-service
+
+# Activate virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Start backend server
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+#### macOS/Linux
+```bash
+# Navigate to backend
+cd backend/py-service
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Start backend server
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+**Expected Output:**
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Application startup complete.
+```
+
+### Terminal 2: Start Electron App
+
+#### Windows (PowerShell)
+```powershell
+# From project root
+pnpm run dev
+```
+
+#### macOS/Linux
+```bash
+# From project root
+pnpm run dev
+```
+
+**Expected Result:**
+- Electron window opens
+- "Service Running" badge appears
+- Device list loads (empty `[]` if no devices connected)
+
+## ✅ Verify Everything Works
+
+### Test Backend Endpoints
+
+#### Windows (PowerShell)
+```powershell
+# Health check
+Invoke-WebRequest -Uri "http://localhost:8000/health" | Select-Object -ExpandProperty Content
+
+# Devices endpoint
+Invoke-WebRequest -Uri "http://localhost:8000/devices" | Select-Object -ExpandProperty Content
+```
+
+#### macOS/Linux
 ```bash
 # Health check
 curl http://localhost:8000/health
 
-# List devices
+# Devices endpoint
 curl http://localhost:8000/devices
-
-# Test email service (requires auth)
-curl -X POST http://localhost:8000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@fxmail.ai","password":"test123456"}'
 ```
 
-## Security
+**Expected Responses:**
+- Health: `{"status":"healthy","version":"1.0.0","service":"GrapheneOS Installer API"}`
+- Devices: `[]` (empty array) or device list
 
-- **End-to-End Encryption**: All email and file content is encrypted
-- **JWT Authentication**: Secure token-based authentication
-- **Rate Limiting**: Protection against brute force attacks
-- **CORS**: Configurable CORS policies
-- **HTTPS**: SSL/TLS encryption (production)
+### Test Electron App
 
-## Troubleshooting
+1. Open Electron app (should auto-open when `pnpm run dev` runs)
+2. Check DevTools console (F12 or Cmd+Option+I)
+3. Should see: `API Base URL: http://localhost:8000`
+4. Should see: "Service Running" badge
+5. No `ERR_EMPTY_RESPONSE` or `405` errors
 
-### Common Issues
+## 🛠️ Quick Commands Reference
 
-1. **Port already in use**: Change ports in `docker-compose.yml`
-2. **Database connection errors**: Check `DATABASE_URL` in environment
-3. **Redis connection errors**: Check `REDIS_URL` in environment
-4. **CORS errors**: Verify `CORS_ORIGINS` includes your domain
+### Backend Commands
 
-### Logs
+#### Windows
+```powershell
+# Start backend
+cd backend\py-service
+.\venv\Scripts\Activate.ps1
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Stop backend
+# Press Ctrl+C in terminal
+```
+
+#### macOS/Linux
+```bash
+# Start backend
+cd backend/py-service
+source venv/bin/activate
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Stop backend
+# Press Ctrl+C in terminal
+```
+
+### Frontend Commands
 
 ```bash
-# Docker logs
-docker-compose logs -f
+# Start Electron app (all platforms)
+pnpm run dev
 
-# Backend logs
-docker logs flashdash -f | grep backend
+# Build Electron app
+pnpm run build
 
-# Nginx logs
-docker exec flashdash tail -f /var/log/nginx/error.log
+# Install dependencies
+pnpm install
 ```
 
-## Contributing
+### Testing Commands
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+#### Windows (PowerShell)
+```powershell
+# Check if backend is running
+Test-NetConnection -ComputerName localhost -Port 8000
 
-## License
-
-[Your License Here]
-
-## Bundle Management
-
-GrapheneOS builds should be placed in the `bundles/` directory following this structure:
-
-```
-bundles/
-└── {codename}/              # Device codename (e.g., panther)
-    └── {version}/           # Build version (e.g., 2025122500)
-        ├── image.zip        # Factory image
-        └── {codename}-install-{version}/  # Extracted install files
-            ├── boot.img
-            ├── bootloader-*.img
-            ├── radio-*.img
-            ├── super_*.img (1-14)
-            └── ...
+# Test API endpoints
+Invoke-WebRequest -Uri "http://localhost:8000/health"
+Invoke-WebRequest -Uri "http://localhost:8000/devices"
 ```
 
-**See [BUNDLE_STRUCTURE.md](./BUNDLE_STRUCTURE.md) for complete details.**
+#### macOS/Linux
+```bash
+# Check if backend is running
+lsof -i :8000
 
-## Support
+# Test API endpoints
+curl http://localhost:8000/health
+curl http://localhost:8000/devices
+```
+
+## 📋 Configuration Files
+
+### Backend: `backend/py-service/.env`
+
+**Minimal configuration (defaults work):**
+```bash
+PY_HOST=127.0.0.1
+PY_PORT=8000
+DEBUG=true
+```
+
+**Full configuration (optional):**
+```bash
+PY_HOST=127.0.0.1
+PY_PORT=8000
+DEBUG=true
+ENVIRONMENT=development
+LOG_LEVEL=DEBUG
+
+# ADB and Fastboot paths
+# Windows: C:\platform-tools\adb.exe
+# macOS/Linux: /usr/local/bin/adb
+ADB_PATH=/usr/local/bin/adb
+FASTBOOT_PATH=/usr/local/bin/fastboot
+
+# Directories
+GRAPHENE_BUNDLES_ROOT=./bundles
+APK_STORAGE_DIR=./apks
+LOG_DIR=./logs
+
+# CORS
+CORS_ORIGINS=*
+ALLOWED_HOSTS=localhost,127.0.0.1
+```
+
+### Frontend: `frontend/packages/desktop/.env`
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+## 🐛 Troubleshooting
+
+### Backend Not Starting
+
+#### Windows
+```powershell
+# Check Python version
+python --version  # Should be 3.11+
+
+# Recreate virtual environment
+cd backend\py-service
+Remove-Item -Recurse -Force venv
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+#### macOS/Linux
+```bash
+# Check Python version
+python3 --version  # Should be 3.11+
+
+# Recreate virtual environment
+cd backend/py-service
+rm -rf venv
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### Port Already in Use
+
+#### Windows (PowerShell)
+```powershell
+# Find process using port 8000
+netstat -ano | findstr :8000
+
+# Kill process (replace PID with actual process ID)
+taskkill /PID <PID> /F
+```
+
+#### macOS/Linux
+```bash
+# Find process using port 8000
+lsof -i :8000
+
+# Kill process
+kill -9 <PID>
+```
+
+### ERR_EMPTY_RESPONSE or 405 Errors
+
+1. **Restart backend** (most important!)
+2. **Clear Electron cache:**
+   ```bash
+   # Windows
+   Remove-Item -Recurse -Force frontend\packages\desktop\node_modules\.vite
+   
+   # macOS/Linux
+   rm -rf frontend/packages/desktop/node_modules/.vite
+   ```
+3. **Restart Electron app**
+
+### Devices Endpoint Hanging
+
+1. **Check ADB/Fastboot:**
+   ```bash
+   # Windows
+   adb devices
+   fastboot devices
+   
+   # macOS/Linux
+   adb devices
+   fastboot devices
+   ```
+
+2. **Restart ADB server:**
+   ```bash
+   adb kill-server
+   adb start-server
+   ```
+
+3. **Restart backend** after fixing ADB
+
+### Electron Not Connecting
+
+1. **Verify .env file:**
+   ```bash
+   # Windows
+   Get-Content frontend\packages\desktop\.env
+   
+   # macOS/Linux
+   cat frontend/packages/desktop/.env
+   ```
+   Should show: `VITE_API_BASE_URL=http://localhost:8000`
+
+2. **Clear cache and restart:**
+   ```bash
+   # Windows
+   Remove-Item -Recurse -Force frontend\packages\desktop\node_modules\.vite
+   pnpm run dev
+   
+   # macOS/Linux
+   rm -rf frontend/packages/desktop/node_modules/.vite
+   pnpm run dev
+   ```
+
+## 📚 Project Structure
+
+```
+graohen_os/
+├── backend/
+│   └── py-service/          # FastAPI backend
+│       ├── app/
+│       │   ├── api/v1/      # API endpoints
+│       │   ├── routes/      # Device/flash routes
+│       │   └── config.py    # Configuration
+│       ├── requirements.txt
+│       └── .env             # Backend config
+├── frontend/
+│   ├── packages/
+│   │   ├── desktop/        # Electron app
+│   │   │   └── .env        # Frontend config
+│   │   └── web/            # Web app
+│   └── package.json
+├── bundles/                # GrapheneOS builds (see BUNDLE_STRUCTURE.md)
+├── docker-compose.yml      # Docker setup (optional)
+└── README.md              # This file
+```
+
+## 🎯 Features
+
+### GrapheneOS Flashing
+- **Desktop Electron App**: Full-featured desktop application
+- **Web Flasher**: Browser-based flashing (WebUSB)
+- **Device Detection**: Automatic device identification
+- **Build Management**: Support for multiple GrapheneOS builds
+
+### API Endpoints
+
+- **Health Check**: `GET /health`
+- **List Devices**: `GET /devices`
+- **Identify Device**: `GET /devices/{device_id}/identify`
+- **Reboot Bootloader**: `POST /devices/{device_id}/reboot/bootloader`
+- **API Documentation**: `http://localhost:8000/docs` (when backend is running)
+
+## 📖 Additional Documentation
+
+- **[LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md)** - Detailed local setup guide
+- **[API_DOCUMENTATION.md](./API_DOCUMENTATION.md)** - Complete API reference
+- **[BUNDLE_STRUCTURE.md](./BUNDLE_STRUCTURE.md)** - How to add GrapheneOS builds
+- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Production deployment guide
+
+## 🔧 Development Scripts
+
+### Windows (PowerShell)
+
+```powershell
+# Start backend
+.\start-backend.ps1
+
+# Start frontend
+.\start-frontend.ps1
+
+# Check backend status
+.\check-backend.ps1
+```
+
+### macOS/Linux
+
+```bash
+# Start backend
+./start-backend.sh
+
+# Start frontend
+./start-frontend.sh
+
+# Check backend status
+./check-backend.sh
+
+# Run verification
+./test-local-setup.sh
+```
+
+## ✅ Checklist
+
+Before running the demo, ensure:
+
+- [ ] Python 3.11+ installed
+- [ ] Node.js 20+ installed
+- [ ] pnpm installed globally
+- [ ] ADB and Fastboot installed and in PATH
+- [ ] Backend virtual environment created
+- [ ] Backend dependencies installed
+- [ ] Frontend dependencies installed (`pnpm install`)
+- [ ] `.env` files created (backend and frontend)
+- [ ] Backend running on port 8000
+- [ ] Electron app starts without errors
+
+## 🚀 Next Steps
+
+1. **Connect a Pixel device** via USB
+2. **Enable USB debugging** on the device
+3. **Authorize computer** when prompted on device
+4. **See device appear** in Electron app
+5. **Add GrapheneOS bundle** to `bundles/` directory (see [BUNDLE_STRUCTURE.md](./BUNDLE_STRUCTURE.md))
+6. **Start flashing** GrapheneOS!
+
+## 📞 Support
 
 For issues and questions:
-- **Documentation**: 
-  - [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) - Complete API reference
-  - [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Deployment instructions
-  - [BUNDLE_STRUCTURE.md](./BUNDLE_STRUCTURE.md) - Bundle structure guide
-- **Issues**: Open an issue on GitHub
-- **Email**: [Your Support Email]
-
-## Changelog
-
-### Version 1.0.0
-- Initial release
-- GrapheneOS flashing support
-- Encrypted email service
-- Secure drive service
-- Complete API documentation
-- Docker deployment support
+- Check [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md) for detailed setup
+- Review [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) for API details
+- See [BUNDLE_STRUCTURE.md](./BUNDLE_STRUCTURE.md) for bundle setup
 
 ---
 
-**Last Updated**: January 2025
+**Ready to flash GrapheneOS? Start with the Quick Start Demo above!** 🎉
+
+**Last Updated**: January 2025  
 **Version**: 1.0.0

@@ -107,13 +107,16 @@ if HAS_SECURITY:
 
 # CORS Middleware - Allow all origins (no restrictions)
 # Note: This allows all origins for development. For production, you may want to restrict this.
+# Note: allow_credentials must be False when allow_origins=["*"]
 logger.info("CORS: Allowing all origins (no restrictions)")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins - no restrictions
-    allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
+    allow_credentials=False,  # Must be False when using allow_origins=["*"]
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Include GrapheneOS routers (legacy routes for compatibility)
@@ -127,6 +130,21 @@ app.include_router(apks.router, prefix="/apks", tags=["apks"])
 # Include FastAPI v1 API routes (if available)
 if HAS_API_ROUTES:
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """Handle OPTIONS requests for CORS preflight - allows all origins"""
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Expose-Headers": "*",
+            "Access-Control-Max-Age": "3600",
+        }
+    )
 
 
 @app.get("/")

@@ -15,13 +15,15 @@ import {
   useFlasher
 } from '@flashdash/flasher-ui';
 import type { FlashState } from '@flashdash/flasher';
-// BuildInfo type - check if it's exported from flasher-ui or flasher
+
+// BuildInfo type
 type BuildInfo = {
   codename: string;
   version: string;
   url: string;
   size: number;
   sha256?: string;
+  // Note: date is not part of the BuildInfo type, removed to fix type errors
 };
 
 export function FlasherPage() {
@@ -46,7 +48,6 @@ export function FlasherPage() {
             version: data.version || 'latest',
             url: data.downloadUrl || `https://releases.grapheneos.org/${data.codename}-factory-${data.version}.zip`,
             size: data.size || 2000000000,
-            date: data.date || new Date().toISOString(),
           }]);
         } else {
           // Fallback to default builds
@@ -56,7 +57,6 @@ export function FlasherPage() {
               version: '2025122500',
               url: 'https://releases.grapheneos.org/panther-factory-2025122500.zip',
               size: 2000000000, // 2GB
-              date: '2025-12-25',
             },
           ]);
         }
@@ -68,7 +68,6 @@ export function FlasherPage() {
             version: '2025122500',
             url: 'https://releases.grapheneos.org/panther-factory-2025122500.zip',
             size: 2000000000,
-            date: '2025-12-25',
           },
         ]);
       }
