@@ -220,7 +220,7 @@ async def unlock_and_flash(request: UnlockAndFlashRequest):
                     else:
                         raise HTTPException(
                             status_code=404,
-                            detail=f"Device identified as {codename} but no bundle found. "
+                            detail=f"Device codename {codename} but no bundle found. "
                                    f"Please download a bundle first or specify bundle_path."
                         )
             else:
@@ -309,11 +309,17 @@ async def unlock_and_flash(request: UnlockAndFlashRequest):
         
         flash_jobs[job_id] = job
         
+        # Use skip_unlock from request, or determine from bootloader_unlocked flag
+        skip_unlock = request.skip_unlock
+        if request.bootloader_unlocked is True:
+            skip_unlock = True
+            logger.info(f"Device {request.device_serial} bootloader already unlocked (from frontend), skipping unlock")
+        
         # Start the unlock and flash process in background
         import threading
         thread = threading.Thread(
             target=_run_unlock_and_flash,
-            args=(job, flasher_script, extracted_dir, request.device_serial, request.skip_unlock)
+            args=(job, flasher_script, extracted_dir, request.device_serial, skip_unlock)
         )
         thread.daemon = True
         thread.start()
