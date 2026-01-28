@@ -13,6 +13,20 @@ from app.services.email_service import (
     get_email_service,
     EmailEncryptionError,
 )
+from app.services.email_service_mongodb import (
+    get_email_service_mongodb,
+    EmailEncryptionError as MongoDBEmailEncryptionError,
+)
+from app.services.email_ingestion import (
+    get_email_ingestion_service,
+    EmailIngestionError,
+)
+from app.middleware.email_security import (
+    check_email_rate_limit,
+    validate_email_token,
+    validate_email_recipients,
+    EmailSecurityMiddleware,
+)
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.redis_client import get_redis
 from app.core.security_hardening import (
@@ -86,6 +100,21 @@ class EmailDeleteResponse(BaseModel):
     email_id: str
     deleted: bool
     message: str
+
+
+class EmailIngestRequest(BaseModel):
+    """Email ingestion request from Postfix"""
+    email_bytes: Optional[bytes] = None
+    recipient_address: Optional[str] = None
+
+
+class EmailIngestResponse(BaseModel):
+    """Email ingestion response"""
+    email_id: str
+    status: str
+    message: Optional[str] = None
+    sender: Optional[str] = None
+    recipient: Optional[str] = None
 
 
 async def check_rate_limit(identifier: str, max_attempts: int, window_seconds: int) -> bool:
@@ -196,9 +225,23 @@ async def send_email(
     
     Encrypts email content and returns secure link for recipients.
     Gmail/external services never see plaintext - only encrypted payloads.
+    
+    Security:
+    - Rate limited: 50 emails/hour, 200 emails/day per user
+    - Recipient validation: max 50 recipients per email
+    - Token entropy validation: minimum 32 characters
+    - Abuse pattern detection
     """
     try:
-        service = get_email_service()
+        user_email = current_user.get("email")
+        
+        # Security checks
+        await check_email_rate_limit(user_email)
+        validate_email_recipients(email_data.to)
+        await EmailSecurityMiddleware.check_abuse_patterns(user_email, email_data.to)
+        
+        # Use MongoDB email service with strong encryption
+        service = get_email_service_mongodb()
         security = get_security_service()
         client_ip = request.client.host if request.client else "unknown"
         
@@ -209,46 +252,24 @@ async def send_email(
         
         email_body_bytes = email_body_content.encode("utf-8")
         
-        # Encrypt email content
-        user_email = current_user.get("email")
-        result = await service.encrypt_email_content(
+        # Encrypt and store email in MongoDB with multi-layer encryption
+        result = await service.encrypt_and_store_email(
             email_body=email_body_bytes,
+            sender_email=user_email,
+            recipient_emails=email_data.to,
             user_email=user_email,
             passcode=email_data.passcode,
             expires_in_hours=email_data.expires_in_hours,
+            subject=email_data.subject,
+            self_destruct=email_data.self_destruct,
         )
         
         access_token = result["access_token"]
         encryption_mode = result["encryption_mode"]
+        email_address = result["email_address"]
+        secure_link = result["secure_link"]
         
-        # Generate email address for SMTP
-        email_address = service.generate_email_address(access_token)
-        
-        # Generate secure HTTPS link for recipients
-        secure_link = generate_secure_link(access_token)
-        
-        # Store self-destruct flag if enabled
-        if email_data.self_destruct:
-            redis = await get_redis()
-            self_destruct_key = f"email:self_destruct:{access_token}"
-            # Set flag that will be checked on read
-            if result.get("expires_at"):
-                # Use expiration time
-                expires_at = datetime.fromisoformat(result["expires_at"].replace("Z", "+00:00"))
-                expires_seconds = int((expires_at - datetime.utcnow()).total_seconds())
-                await redis.setex(self_destruct_key, expires_seconds, "1")
-            else:
-                # Default: 30 days
-                await redis.setex(self_destruct_key, 30 * 24 * 3600, "1")
-        
-        # Schedule auto-wipe if expiration set
-        if email_data.expires_in_hours:
-            expires_at = datetime.utcnow() + timedelta(hours=email_data.expires_in_hours)
-            await security.schedule_auto_wipe(
-                content_id=access_token,
-                expires_at=expires_at,
-                content_type="email",
-            )
+        # Self-destruct and expiration are handled in MongoDB service
         
         # Log email sent event
         await security.log_security_event(
@@ -264,6 +285,14 @@ async def send_email(
                 "self_destruct": email_data.self_destruct,
                 "expires_in_hours": email_data.expires_in_hours,
             },
+            success=True,
+        )
+        
+        # Log email send for monitoring
+        await EmailSecurityMiddleware.log_email_send(
+            user_email=user_email,
+            recipients=email_data.to,
+            email_id=access_token,
             success=True,
         )
         
@@ -310,7 +339,8 @@ async def get_email(
     For passcode-protected emails, use the unlock endpoint.
     """
     try:
-        service = get_email_service()
+        # Use MongoDB email service
+        service = get_email_service_mongodb()
         security = get_security_service()
         client_ip = request.client.host if request.client else "unknown"
         user_email = current_user.get("email")
@@ -332,28 +362,15 @@ async def get_email(
                 subject = lines[0].replace("Subject: ", "")
                 body = lines[1].lstrip()
         
-        # Get metadata (using internal method)
-        # Note: This accesses internal method - in production, add public method
-        from app.services.email_service import REDIS_ACCESS_TOKEN_PREFIX
-        redis = await get_redis()
-        metadata_key = f"{REDIS_ACCESS_TOKEN_PREFIX}{email_id}"
-        metadata_json = await redis.get(metadata_key)
+        # Get metadata from MongoDB
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        email_doc = await email_collection.find_one({"access_token": email_id})
         
-        metadata = None
-        if metadata_json:
-            import json
-            try:
-                metadata = json.loads(metadata_json)
-            except json.JSONDecodeError:
-                pass
-        
-        encryption_mode = metadata.get("encryption_mode", "authenticated") if metadata else "authenticated"
-        is_passcode_protected = metadata.get("has_passcode", False) if metadata else False
-        
-        # Check self-destruct flag
-        redis = await get_redis()
-        self_destruct_key = f"email:self_destruct:{email_id}"
-        self_destruct = await redis.get(self_destruct_key) is not None
+        encryption_mode = email_doc.get("encryption_mode", "authenticated") if email_doc else "authenticated"
+        is_passcode_protected = email_doc.get("has_passcode", False) if email_doc else False
+        self_destruct = email_doc.get("self_destruct", False) if email_doc else False
         
         # Enforce view-once if self-destruct enabled
         if self_destruct:
@@ -406,14 +423,12 @@ async def get_email(
         
         logger.info(f"Email retrieved: id={email_id[:8]}..., user={user_email}")
         
-        # Get expiration from metadata
+        # Get expiration from MongoDB
         expires_at = None
-        if metadata:
-            created_at_str = metadata.get("created_at")
-            if created_at_str:
-                # Expiration would be calculated from creation time and TTL
-                # For now, we'll indicate if email has expiration
-                expires_at = metadata.get("expires_at")
+        if email_doc and email_doc.get("expires_at"):
+            expires_at = email_doc["expires_at"]
+            if isinstance(expires_at, datetime):
+                expires_at = expires_at.isoformat()
         
         return EmailGetResponse(
             email_id=email_id,
@@ -487,7 +502,8 @@ async def unlock_email(
                 }
             )
         
-        service = get_email_service()
+        # Use MongoDB email service
+        service = get_email_service_mongodb()
         
         # Attempt to decrypt with passcode
         try:
@@ -495,7 +511,7 @@ async def unlock_email(
                 access_token=email_id,
                 passcode=unlock_data.passcode,
             )
-        except EmailEncryptionError as e:
+        except (EmailEncryptionError, MongoDBEmailEncryptionError) as e:
             # Record failed attempt
             remaining = await security.record_failed_attempt(
                 identifier=identifier,
@@ -534,29 +550,14 @@ async def unlock_email(
         # Success - reset brute force counter
         await security.reset_brute_force_counter(identifier, action="email_unlock")
         
-        # Check view-once if self-destruct enabled
-        redis = await get_redis()
-        self_destruct_key = f"email:self_destruct:{email_id}"
-        self_destruct = await redis.get(self_destruct_key) is not None
-        
-        if self_destruct:
-            try:
-                await security.enforce_view_once(
-                    content_id=email_id,
-                    identifier=identifier,
-                )
-            except ViewOnceError:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Email can only be viewed once (self-destruct)"
-                )
+        # Self-destruct is handled automatically in MongoDB service
         
         # Log successful unlock
         await security.log_security_event(
             SecurityEvent.EMAIL_ACCESSED,
             ip_address=client_ip,
             action="email_unlock",
-            metadata={"email_id": email_id[:8] + "...", "self_destruct": self_destruct},
+            metadata={"email_id": email_id[:8] + "..."},
             success=True,
         )
         
@@ -570,17 +571,6 @@ async def unlock_email(
             if len(lines) == 2:
                 subject = lines[0].replace("Subject: ", "")
                 body = lines[1].lstrip()
-        
-        # Check self-destruct flag
-        redis = await get_redis()
-        self_destruct_key = f"email:self_destruct:{email_id}"
-        self_destruct = await redis.get(self_destruct_key) is not None
-        
-        # Delete email if self-destruct is enabled
-        if self_destruct:
-            await service.delete_email(email_id)
-            await redis.delete(self_destruct_key)
-            logger.info(f"Email self-destructed after unlock: {email_id[:8]}...")
         
         # Log successful unlock
         logger.info(
@@ -618,41 +608,30 @@ async def delete_email(
     - Anyone with the email_id (public delete endpoint for self-destruct)
     """
     try:
-        service = get_email_service()
+        # Use MongoDB email service
+        service = get_email_service_mongodb()
         
         # Verify user owns the email (if authenticated)
         if current_user:
-            from app.services.email_service import REDIS_ACCESS_TOKEN_PREFIX
-            redis = await get_redis()
-            metadata_key = f"{REDIS_ACCESS_TOKEN_PREFIX}{email_id}"
-            metadata_json = await redis.get(metadata_key)
+            from app.core.mongodb import get_mongodb
+            db = get_mongodb()
+            email_collection = db.emails
+            email_doc = await email_collection.find_one({"access_token": email_id})
             
-            metadata = None
-            if metadata_json:
-                import json
-                try:
-                    metadata = json.loads(metadata_json)
-                except json.JSONDecodeError:
-                    pass
-            
-            if metadata:
+            if email_doc:
                 user_email = current_user.get("email")
-                email_owner = metadata.get("user_email")
+                email_owner = email_doc.get("sender_email", "").lower()
                 if email_owner and email_owner != user_email.lower():
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="You can only delete emails you created"
                     )
         
-        # Delete email
+        # Delete email from MongoDB
         deleted = await service.delete_email(email_id)
         
-        # Also delete self-destruct flag if exists
+        # Delete rate limit counter from Redis
         redis = await get_redis()
-        self_destruct_key = f"email:self_destruct:{email_id}"
-        await redis.delete(self_destruct_key)
-        
-        # Delete rate limit counter
         rate_limit_key = f"{REDIS_RATE_LIMIT_PREFIX}{email_id}"
         await redis.delete(rate_limit_key)
         
@@ -676,5 +655,156 @@ async def delete_email(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete email"
+        )
+
+
+@router.post("/ingest", response_model=EmailIngestResponse, status_code=status.HTTP_201_CREATED)
+async def ingest_email(
+    request: Request,
+):
+    """
+    Ingest incoming email from Postfix SMTP server.
+    
+    This endpoint receives emails piped from Postfix and:
+    1. Parses email content
+    2. Extracts token from recipient address (token@fxmail.ai)
+    3. Encrypts email with 3-layer encryption
+    4. Stores in MongoDB
+    
+    Expected flow:
+    Postfix → Pipe → FastAPI /email/ingest → MongoDB
+    
+    Security:
+    - Only accepts emails to token@fxmail.ai addresses
+    - Validates token entropy (min 32 chars)
+    - Prevents duplicate ingestion
+    """
+    try:
+        # Get raw email bytes from request body
+        email_bytes = await request.body()
+        
+        if not email_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email content is required"
+            )
+        
+        # Validate email size
+        EmailSecurityMiddleware.validate_email_size(len(email_bytes))
+        
+        # Get recipient from headers (Postfix sets this)
+        recipient_address = request.headers.get("X-Recipient") or request.headers.get("To")
+        
+        # Ingest email
+        ingestion_service = get_email_ingestion_service()
+        result = await ingestion_service.ingest_email(
+            email_bytes=email_bytes,
+            recipient_address=recipient_address,
+        )
+        
+        logger.info(
+            f"Email ingested: id={result['email_id'][:16]}..., "
+            f"sender={result.get('sender', 'unknown')}, "
+            f"status={result['status']}"
+        )
+        
+        return EmailIngestResponse(
+            email_id=result["email_id"],
+            status=result["status"],
+            message=result.get("message"),
+            sender=result.get("sender"),
+            recipient=result.get("recipient"),
+        )
+        
+    except EmailIngestionError as e:
+        logger.warning(f"Email ingestion failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Email ingestion error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to ingest email"
+        )
+
+
+@router.get("/token/{token}", response_model=EmailGetResponse)
+async def get_email_by_token(
+    token: str,
+    request: Request,
+):
+    """
+    Get encrypted email by token (for web viewer).
+    
+    This endpoint allows accessing emails via token without authentication.
+    Used by the web email viewer at fxmail.ai/email/{token}
+    
+    Security:
+    - Token must be at least 32 characters
+    - Returns encrypted payload (client decrypts)
+    - Never decrypts on server
+    """
+    try:
+        # Validate token entropy
+        validate_email_token(token)
+        
+        # Use MongoDB email service
+        service = get_email_service_mongodb()
+        client_ip = request.client.host if request.client else "unknown"
+        
+        # Get email metadata from MongoDB
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        
+        # Find email by email_id (token)
+        email_doc = await email_collection.find_one({"email_id": token})
+        
+        if not email_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Email not found"
+            )
+        
+        # Check expiration
+        if email_doc.get("expires_at"):
+            expires_at = email_doc["expires_at"]
+            if isinstance(expires_at, str):
+                from datetime import datetime
+                expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if datetime.utcnow() > expires_at:
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Email has expired"
+                )
+        
+        # Return metadata (encrypted content stays encrypted)
+        # Client will decrypt using passcode or authentication
+        encryption_mode = email_doc.get("encryption_mode", "authenticated")
+        is_passcode_protected = email_doc.get("has_passcode", False)
+        
+        # Log access
+        logger.info(f"Email accessed by token: {token[:16]}..., ip={client_ip}")
+        
+        return EmailGetResponse(
+            email_id=token,
+            subject=None,  # Subject is encrypted, don't expose
+            body="",  # Body is encrypted, don't expose
+            encryption_mode=encryption_mode,
+            expires_at=email_doc.get("expires_at").isoformat() if email_doc.get("expires_at") else None,
+            is_passcode_protected=is_passcode_protected,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get email by token: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve email"
         )
 

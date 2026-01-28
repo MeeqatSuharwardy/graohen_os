@@ -37,6 +37,7 @@ security = HTTPBearer()
 REDIS_TOKEN_REVOKED_PREFIX = "auth:revoked:"
 REDIS_REFRESH_TOKEN_PREFIX = "auth:refresh:"
 REDIS_DEVICE_PREFIX = "auth:device:"
+REDIS_DEVICE_KEY_FINGERPRINT_PREFIX = "auth:device_key:"
 
 # Token rotation settings
 REFRESH_TOKEN_ROTATION_ENABLED = True
@@ -86,6 +87,25 @@ class LogoutRequest(BaseModel):
     """Logout request"""
     refresh_token: Optional[str] = None
     all_devices: bool = False
+
+
+class DeviceEncryptionKeyRegister(BaseModel):
+    """Device encryption key registration (fingerprint only, never the actual key)"""
+    device_id: str = Field(..., min_length=1, max_length=255, description="Device identifier")
+    key_fingerprint: str = Field(
+        ...,
+        min_length=32,
+        max_length=128,
+        description="SHA-256 hash/fingerprint of the device encryption key (for verification only)"
+    )
+    key_algorithm: str = Field(default="AES-256-GCM", description="Encryption algorithm used")
+
+
+class DeviceEncryptionKeyResponse(BaseModel):
+    """Device encryption key response"""
+    device_id: str
+    registered: bool
+    message: str
 
 
 # Temporary User model (until database models are defined)
@@ -820,5 +840,117 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+@router.post("/device/register-key", response_model=DeviceEncryptionKeyResponse)
+async def register_device_encryption_key(
+    key_data: DeviceEncryptionKeyRegister,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Register device encryption key fingerprint.
+    
+    IMPORTANT: This endpoint only stores a fingerprint/hash of the encryption key,
+    NEVER the actual encryption key. The actual key is generated and stored
+    client-side only (on first app launch) and never transmitted to the server.
+    
+    The fingerprint is used for:
+    - Verifying device identity
+    - Ensuring key consistency across sessions
+    - Security auditing
+    
+    The server cannot decrypt any content encrypted with this key.
+    """
+    try:
+        user_id = current_user.get("id")
+        user_email = current_user.get("email")
+        
+        # Store device key fingerprint (not the actual key)
+        redis = await get_redis()
+        device_key_fingerprint_key = f"{REDIS_DEVICE_KEY_FINGERPRINT_PREFIX}{user_id}:{key_data.device_id}"
+        
+        fingerprint_data = {
+            "device_id": key_data.device_id,
+            "key_fingerprint": key_data.key_fingerprint,
+            "key_algorithm": key_data.key_algorithm,
+            "registered_at": datetime.utcnow().isoformat(),
+            "user_email": user_email,
+        }
+        
+        import json
+        await redis.set(
+            device_key_fingerprint_key,
+            json.dumps(fingerprint_data)
+        )
+        
+        # Also store in device list for user
+        user_devices_key = f"{REDIS_DEVICE_PREFIX}{user_id}:devices"
+        await redis.sadd(user_devices_key, key_data.device_id)
+        
+        logger.info(
+            f"Device encryption key fingerprint registered: "
+            f"user={user_email}, device_id={key_data.device_id[:8]}..."
+        )
+        
+        return DeviceEncryptionKeyResponse(
+            device_id=key_data.device_id,
+            registered=True,
+            message="Device encryption key fingerprint registered successfully. The actual key remains on your device and is never transmitted to the server."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Device key registration failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to register device encryption key"
+        )
+
+
+@router.get("/device/key-info/{device_id}", response_model=Dict[str, Any])
+async def get_device_key_info(
+    device_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get device encryption key fingerprint information.
+    
+    Returns only the fingerprint (hash) of the key, never the actual key.
+    Used for verification and security auditing.
+    """
+    try:
+        user_id = current_user.get("id")
+        
+        redis = await get_redis()
+        device_key_fingerprint_key = f"{REDIS_DEVICE_KEY_FINGERPRINT_PREFIX}{user_id}:{device_id}"
+        
+        fingerprint_json = await redis.get(device_key_fingerprint_key)
+        if not fingerprint_json:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Device encryption key fingerprint not found"
+            )
+        
+        import json
+        fingerprint_data = json.loads(fingerprint_json)
+        
+        # Return only fingerprint info, never the actual key
+        return {
+            "device_id": fingerprint_data.get("device_id"),
+            "key_fingerprint": fingerprint_data.get("key_fingerprint"),
+            "key_algorithm": fingerprint_data.get("key_algorithm"),
+            "registered_at": fingerprint_data.get("registered_at"),
+            "note": "This is only a fingerprint/hash of your encryption key. The actual key is stored only on your device and never transmitted to the server."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get device key info: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve device key information"
         )
 
