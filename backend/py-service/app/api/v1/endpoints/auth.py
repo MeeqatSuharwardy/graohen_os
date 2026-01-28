@@ -147,6 +147,9 @@ async def create_user(email: str, password: str, full_name: Optional[str] = None
     # Hash password
     hashed_password = hash_password(password)
     
+    # Generate user ID
+    user_id = secrets.token_urlsafe(16)
+    
     # Create user record
     user = {
         "id": secrets.token_urlsafe(16),
