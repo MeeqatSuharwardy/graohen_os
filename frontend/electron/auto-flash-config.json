@@ -1,0 +1,11 @@
+{
+  "autoDetect": true,
+  "autoFlash": false,
+  "autoFlashDelay": 5000,
+  "targetCodename": null,
+  "targetVersion": null,
+  "skipUnlock": true,
+  "bundlesPath": "./bundles",
+  "showWindow": true,
+  "minimizeToTray": false
+}

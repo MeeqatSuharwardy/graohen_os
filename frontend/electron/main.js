@@ -959,6 +959,20 @@ ipcMain.handle('get-local-bundles-path', async () => {
 async function findFastbootPath() {
   const isWindows = process.platform === 'win32';
 
+  // Check USB tools directory first (for portable mode)
+  const usbToolsPath = path.join(path.dirname(process.execPath), '..', 'tools', isWindows ? 'fastboot.exe' : 'fastboot');
+  if (fsSync.existsSync(usbToolsPath)) {
+    console.log('[Tools] Found Fastboot in USB tools directory:', usbToolsPath);
+    return usbToolsPath;
+  }
+
+  // Check relative to app directory (for portable builds)
+  const relativeToolsPath = path.join(__dirname, '..', 'tools', isWindows ? 'fastboot.exe' : 'fastboot');
+  if (fsSync.existsSync(relativeToolsPath)) {
+    console.log('[Tools] Found Fastboot in relative tools directory:', relativeToolsPath);
+    return relativeToolsPath;
+  }
+
   // First, try direct command lookup
   try {
     const command = isWindows ? 'where fastboot' : 'which fastboot';
@@ -993,7 +1007,7 @@ async function findFastbootPath() {
     }
   }
 
-  throw new Error('Fastboot not found. Please install Android platform-tools.');
+  throw new Error('Fastboot not found. Please install Android platform-tools or add to USB tools folder.');
 }
 
 /**
@@ -1001,6 +1015,20 @@ async function findFastbootPath() {
  */
 async function findAdbPath() {
   const isWindows = process.platform === 'win32';
+
+  // Check USB tools directory first (for portable mode)
+  const usbToolsPath = path.join(path.dirname(process.execPath), '..', 'tools', isWindows ? 'adb.exe' : 'adb');
+  if (fsSync.existsSync(usbToolsPath)) {
+    console.log('[Tools] Found ADB in USB tools directory:', usbToolsPath);
+    return usbToolsPath;
+  }
+
+  // Check relative to app directory (for portable builds)
+  const relativeToolsPath = path.join(__dirname, '..', 'tools', isWindows ? 'adb.exe' : 'adb');
+  if (fsSync.existsSync(relativeToolsPath)) {
+    console.log('[Tools] Found ADB in relative tools directory:', relativeToolsPath);
+    return relativeToolsPath;
+  }
 
   // First, try direct command lookup
   try {
@@ -1036,7 +1064,7 @@ async function findAdbPath() {
     }
   }
 
-  throw new Error('ADB not found. Please install Android platform-tools.');
+  throw new Error('ADB not found. Please install Android platform-tools or add to USB tools folder.');
 }
 
 /**
@@ -1488,6 +1516,72 @@ ipcMain.handle('upload-apk', async (event) => {
 });
 
 // Log registered IPC handlers (for debugging)
+/**
+ * Handle auto-flash start request
+ */
+ipcMain.handle('auto-flash-start', async (event, { deviceSerial, codename, bundlePath, skipUnlock }) => {
+  try {
+    console.log(`[AutoFlash] Starting flash for device ${deviceSerial}`);
+
+    // Find bundle version from path
+    const pathParts = bundlePath.split(path.sep);
+    const versionIndex = pathParts.findIndex(part => /^\d{10}$/.test(part)); // YYYYMMDDHH format
+    const version = versionIndex >= 0 ? pathParts[versionIndex] : null;
+
+    if (!version) {
+      throw new Error('Could not determine bundle version from path');
+    }
+
+    // Execute local flash
+    const progressCallback = (progress) => {
+      event.sender.send('flash-progress', progress);
+    };
+
+    const result = await executeLocalFlash(deviceSerial, bundlePath, skipUnlock, progressCallback);
+    return result;
+  } catch (error) {
+    console.error('[AutoFlash] Flash error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Handle get auto-flash config request
+ */
+ipcMain.handle('get-auto-flash-config', async () => {
+  return autoFlashConfig || {};
+});
+
+/**
+ * Handle update auto-flash config request
+ */
+ipcMain.handle('update-auto-flash-config', async (event, newConfig) => {
+  try {
+    autoFlashConfig = { ...autoFlashConfig, ...newConfig };
+
+    // Save to file
+    const configPath = path.join(__dirname, 'auto-flash-config.json');
+    await fs.writeFile(configPath, JSON.stringify(autoFlashConfig, null, 2));
+
+    console.log('[AutoFlash] Configuration updated:', autoFlashConfig);
+
+    // Restart auto-detection if needed
+    if (autoDetectInterval) {
+      clearInterval(autoDetectInterval);
+      autoDetectInterval = null;
+    }
+
+    if (autoFlashConfig && autoFlashConfig.autoDetect) {
+      await startAutoDetection();
+    }
+
+    return { success: true, config: autoFlashConfig };
+  } catch (error) {
+    console.error('[AutoFlash] Failed to update config:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 console.log('[IPC] Registering IPC handlers...');
 console.log('[IPC] Registered handlers:', [
   'detect-devices',
@@ -1498,7 +1592,10 @@ console.log('[IPC] Registered handlers:', [
   'get-local-bundles-path',
   'execute-local-flash',
   'install-apk',
-  'upload-apk'
+  'upload-apk',
+  'auto-flash-start',
+  'get-auto-flash-config',
+  'update-auto-flash-config'
 ]);
 
 // Verify install-apk handler is actually registered
@@ -1508,14 +1605,129 @@ if (ipcMain.listenerCount('install-apk') > 0 || ipcMain._handlers && ipcMain._ha
   console.error('[IPC] ✗ install-apk handler NOT registered!');
 }
 
+// Auto-flash configuration
+let autoFlashConfig = null;
+let autoDetectInterval = null;
+
+async function loadAutoFlashConfig() {
+  try {
+    const configPath = path.join(__dirname, 'auto-flash-config.json');
+    if (fsSync.existsSync(configPath)) {
+      const configData = await fs.readFile(configPath, 'utf-8');
+      autoFlashConfig = JSON.parse(configData);
+      console.log('[AutoFlash] Configuration loaded:', autoFlashConfig);
+    } else {
+      // Default config
+      autoFlashConfig = {
+        autoDetect: false,
+        autoFlash: false,
+        autoFlashDelay: 5000,
+        targetCodename: null,
+        targetVersion: null,
+        skipUnlock: true,
+        bundlesPath: './bundles',
+        showWindow: true,
+        minimizeToTray: false
+      };
+    }
+  } catch (error) {
+    console.error('[AutoFlash] Failed to load config:', error);
+    autoFlashConfig = { autoDetect: false, autoFlash: false };
+  }
+}
+
+async function startAutoDetection() {
+  if (!autoFlashConfig || !autoFlashConfig.autoDetect) {
+    return;
+  }
+
+  console.log('[AutoFlash] Starting auto-detection...');
+
+  autoDetectInterval = setInterval(async () => {
+    try {
+      const devices = await detectDevices();
+
+      if (devices.length > 0) {
+        console.log(`[AutoFlash] Detected ${devices.length} device(s)`);
+
+        // Send notification to renderer if window exists
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('auto-device-detected', devices);
+        }
+
+        // Auto-flash if enabled
+        if (autoFlashConfig.autoFlash && devices.length > 0) {
+          const device = devices[0]; // Flash first device
+
+          // Check if target codename matches (if specified)
+          if (autoFlashConfig.targetCodename && device.codename !== autoFlashConfig.targetCodename) {
+            console.log(`[AutoFlash] Device codename ${device.codename} doesn't match target ${autoFlashConfig.targetCodename}`);
+            return;
+          }
+
+          console.log(`[AutoFlash] Auto-flashing device ${device.serial} in ${autoFlashConfig.autoFlashDelay}ms...`);
+
+          setTimeout(async () => {
+            try {
+              // Find bundle
+              const bundlesPath = path.isAbsolute(autoFlashConfig.bundlesPath)
+                ? autoFlashConfig.bundlesPath
+                : path.join(path.dirname(process.execPath), autoFlashConfig.bundlesPath);
+
+              // Look for bundle matching codename and version
+              const bundleDir = path.join(bundlesPath, device.codename || 'unknown', autoFlashConfig.targetVersion || 'latest');
+
+              if (fsSync.existsSync(bundleDir)) {
+                console.log(`[AutoFlash] Found bundle at: ${bundleDir}`);
+                // Trigger flash via IPC
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                  mainWindow.webContents.send('auto-flash-start', {
+                    deviceSerial: device.serial,
+                    codename: device.codename,
+                    bundlePath: bundleDir,
+                    skipUnlock: autoFlashConfig.skipUnlock
+                  });
+                }
+              } else {
+                console.log(`[AutoFlash] Bundle not found at: ${bundleDir}`);
+              }
+            } catch (error) {
+              console.error('[AutoFlash] Auto-flash error:', error);
+            }
+          }, autoFlashConfig.autoFlashDelay);
+        }
+      }
+    } catch (error) {
+      console.error('[AutoFlash] Detection error:', error);
+    }
+  }, 3000); // Check every 3 seconds
+}
+
 // App lifecycle
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Load auto-flash configuration
+  await loadAutoFlashConfig();
+
   // Verify handlers are registered before creating window
   console.log('[IPC] App ready - verifying handlers...');
   console.log('[IPC] install-apk handler registered:', typeof ipcMain._handlers !== 'undefined' && ipcMain._handlers.has('install-apk'));
 
-  createWindow();
+  // Create window (or minimize if configured)
+  if (autoFlashConfig && !autoFlashConfig.showWindow) {
+    // Don't show window, but still create it for IPC
+    createWindow();
+    if (mainWindow) {
+      mainWindow.hide();
+    }
+  } else {
+    createWindow();
+  }
+
+  // Start auto-detection if enabled
+  if (autoFlashConfig && autoFlashConfig.autoDetect) {
+    await startAutoDetection();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

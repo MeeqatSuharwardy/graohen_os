@@ -107,6 +107,51 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   uploadApk: () => 
     ipcRenderer.invoke('upload-apk'),
+
+  /**
+   * Get auto-flash configuration
+   * @returns {Promise<Object>}
+   */
+  getAutoFlashConfig: () => 
+    ipcRenderer.invoke('get-auto-flash-config'),
+
+  /**
+   * Update auto-flash configuration
+   * @param {Object} config - Configuration object
+   * @returns {Promise<{success: boolean, config?: Object, error?: string}>}
+   */
+  updateAutoFlashConfig: (config) => 
+    ipcRenderer.invoke('update-auto-flash-config', config),
+
+  /**
+   * Start auto-flash for a device
+   * @param {Object} params - Flash parameters
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  autoFlashStart: (params) => 
+    ipcRenderer.invoke('auto-flash-start', params),
+
+  /**
+   * Listen for auto device detection events
+   * @param {function} callback - Callback function
+   * @returns {function} - Unsubscribe function
+   */
+  onAutoDeviceDetected: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('auto-device-detected', handler);
+    return () => ipcRenderer.removeListener('auto-device-detected', handler);
+  },
+
+  /**
+   * Listen for auto-flash start events
+   * @param {function} callback - Callback function
+   * @returns {function} - Unsubscribe function
+   */
+  onAutoFlashStart: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('auto-flash-start', handler);
+    return () => ipcRenderer.removeListener('auto-flash-start', handler);
+  },
 });
 
 /**

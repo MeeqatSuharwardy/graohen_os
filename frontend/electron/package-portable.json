@@ -1,0 +1,48 @@
+{
+  "name": "flashdash-client-portable",
+  "version": "1.0.0",
+  "description": "FlashDash Portable - USB-based Android OS Flashing",
+  "main": "main.js",
+  "scripts": {
+    "build:portable": "electron-builder --win --config=package-portable.json --dir"
+  },
+  "build": {
+    "appId": "co.vulcantech.flashdash.portable",
+    "productName": "FlashDash Portable",
+    "directories": {
+      "output": "../build/portable"
+    },
+    "files": [
+      "**/*",
+      "!../renderer",
+      "!../public",
+      "../renderer/**/*",
+      "../public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../renderer",
+        "to": "renderer",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "../assets/icon.png",
+      "publisherName": "VulcanTech"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}.exe"
+    }
+  }
+}

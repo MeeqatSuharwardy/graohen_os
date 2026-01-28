@@ -9,6 +9,8 @@
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:win:signed": "electron-builder --win --config.win.sign=sign.js",
+    "build:portable": "electron-builder --win --config=package-portable.json --dir",
+    "build:usb": "npm run build:win && ./create-usb-package.sh",
     "dist": "electron-builder --publish=never"
   },
   "keywords": [
