@@ -8,6 +8,32 @@
  */
 
 const BACKEND_URL = 'https://freedomos.vulcantech.co';
+/** Option value format for list-all: "codename|version" */
+const LIST_ALL_VALUE_SEP = '|';
+
+/** Codename -> model name for dropdown and UI (fallback if API does not send deviceName) */
+const DEVICE_DISPLAY_NAMES = {
+  oriole: 'Pixel 6',
+  raven: 'Pixel 6 Pro',
+  bluejay: 'Pixel 6a',
+  panther: 'Pixel 7',
+  cheetah: 'Pixel 7 Pro',
+  lynx: 'Pixel 7a',
+  shiba: 'Pixel 8',
+  husky: 'Pixel 8 Pro',
+  akita: 'Pixel 8a',
+  tokay: 'Pixel 9',
+  caiman: 'Pixel 9 Pro',
+  komodo: 'Pixel 9 Pro XL',
+  comet: 'Pixel 9 Pro Fold',
+  felix: 'Pixel Fold',
+  tangor: 'Pixel Tablet',
+  tangorpro: 'Pixel Tablet',
+  atlas: 'Pixel 10',
+  atlaspro: 'Pixel 10 Pro',
+  atlasxl: 'Pixel 10 Pro XL',
+  atlasfold: 'Pixel 10 Pro Fold',
+};
 
 // State
 let detectedDevices = [];
@@ -139,10 +165,11 @@ function selectDevice(serial) {
     }
   });
 
-  // Show selected device info
+  // Show selected device info (use model name from map if device model missing)
+  const deviceLabel = selectedDevice.model || DEVICE_DISPLAY_NAMES[selectedDevice.codename] || selectedDevice.codename || 'Unknown';
   selectedDeviceInfo.innerHTML = `
     <strong>Selected Device:</strong><br>
-    ${selectedDevice.model || 'Unknown'} (${selectedDevice.codename || 'Unknown codename'})<br>
+    ${deviceLabel} (${selectedDevice.codename || 'Unknown codename'})<br>
     Serial: ${selectedDevice.serial}<br>
     State: ${selectedDevice.state}<br>
     Bootloader: ${selectedDevice.bootloader_unlocked ? '🔓 Unlocked' : '🔒 Locked'}
@@ -286,13 +313,36 @@ async function loadAllImages() {
     const response = await fetch(`${BACKEND_URL}/bundles/list-all`);
     if (!response.ok) throw new Error(`Failed to load list: ${response.statusText}`);
     const data = await response.json();
-    const bundles = data.bundles || [];
+    // Support both { bundles: [...] } and { byCodename: { codename: [entries] } }
+    let bundles = data.bundles;
+    if (!Array.isArray(bundles) && data.byCodename && typeof data.byCodename === 'object') {
+      bundles = [];
+      Object.keys(data.byCodename).forEach((codename) => {
+        const versions = data.byCodename[codename];
+        if (Array.isArray(versions)) {
+          versions.forEach((b) => {
+            bundles.push({
+              codename: b.codename || codename,
+              version: b.version,
+              deviceName: b.deviceName || codename,
+              path: b.path,
+              downloadUrl: b.downloadUrl
+            });
+          });
+        }
+      });
+    }
+    bundles = bundles || [];
     versionSelect.innerHTML = '<option value="">Select image to download/flash...</option>';
     bundleVersionSelect.innerHTML = '<option value="">Select image...</option>';
     bundleMetadata = {};
-    bundles.forEach(b => {
-      const value = `${b.codename}${LIST_ALL_VALUE_SEP}${b.version}`;
-      const label = `${b.deviceName || b.codename} (${b.codename}) - ${b.version}`;
+    bundles.forEach((b) => {
+      const codename = b.codename || '';
+      const version = b.version || '';
+      if (!codename || !version) return;
+      const value = `${codename}${LIST_ALL_VALUE_SEP}${version}`;
+      const modelName = b.deviceName || DEVICE_DISPLAY_NAMES[codename] || codename;
+      const label = `${modelName} (${codename}) - ${version}`;
       const opt1 = document.createElement('option');
       opt1.value = value;
       opt1.textContent = label;
@@ -301,7 +351,7 @@ async function loadAllImages() {
       opt2.value = value;
       opt2.textContent = label;
       bundleVersionSelect.appendChild(opt2);
-      bundleMetadata[value] = { codename: b.codename, version: b.version, deviceName: b.deviceName };
+      bundleMetadata[value] = { codename, version, deviceName: b.deviceName };
     });
     if (bundles.length > 0) {
       downloadBundleBtn.disabled = false;
@@ -1401,5 +1451,6 @@ if (window.electronAPI && typeof window.electronAPI.onLogLine === 'function') {
 console.log('FlashDash Client initialized');
 showStatus('Ready. Click "Detect Devices" to begin.', 'info');
 
-// Auto-load APKs on startup
+// Auto-load APKs and OS image list on startup so dropdowns are populated
 loadApks();
+loadAllImages();

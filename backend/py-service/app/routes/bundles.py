@@ -22,16 +22,34 @@ router = APIRouter()
 # Store download progress in memory (use Redis in production)
 download_progress: Dict[str, Dict[str, Any]] = {}
 
-# GrapheneOS device codename -> display name (Pixel 7 = panther, 7 Pro = cheetah, etc.)
+# GrapheneOS device codename -> human-readable model name (for API and UI)
 DEVICE_DISPLAY_NAMES = {
+    # Pixel 6 series
+    "oriole": "Pixel 6",
+    "raven": "Pixel 6 Pro",
+    "bluejay": "Pixel 6a",
+    # Pixel 7 series
     "panther": "Pixel 7",
     "cheetah": "Pixel 7 Pro",
     "lynx": "Pixel 7a",
-    "tangor": "Pixel Tablet",
-    "felix": "Pixel Fold",
+    # Pixel 8 series
     "shiba": "Pixel 8",
     "husky": "Pixel 8 Pro",
     "akita": "Pixel 8a",
+    # Pixel 9 series
+    "tokay": "Pixel 9",
+    "caiman": "Pixel 9 Pro",
+    "komodo": "Pixel 9 Pro XL",
+    "comet": "Pixel 9 Pro Fold",
+    "felix": "Pixel Fold",
+    # Pixel Tablet
+    "tangor": "Pixel Tablet",
+    "tangorpro": "Pixel Tablet",
+    # Pixel 10 series
+    "atlas": "Pixel 10",
+    "atlaspro": "Pixel 10 Pro",
+    "atlasxl": "Pixel 10 Pro XL",
+    "atlasfold": "Pixel 10 Pro Fold",
 }
 
 
@@ -52,11 +70,12 @@ async def list_all_downloadable():
     indexed = index_bundles()
     result = []
     for codename, versions in indexed.items():
+        # Always use human-readable model name (e.g. Pixel 7, Pixel 6 Pro) for API response
         display_name = DEVICE_DISPLAY_NAMES.get(codename, codename)
         for b in versions:
             result.append({
                 "codename": codename,
-                "deviceName": b.get("deviceName") or display_name,
+                "deviceName": display_name,
                 "version": b.get("version"),
                 "path": b.get("path"),
                 "downloadUrl": b.get("downloadUrl"),

@@ -1068,8 +1068,10 @@ async function findAdbPath() {
 }
 
 /**
- * Run flash script from bundle path: flash-all.bat (Windows) or flash-all.sh (Mac).
- * Uses download path; passes device serial via FASTBOOT_SERIAL so the script flashes the correct device.
+ * Run flash script from the downloaded bundle directory:
+ * - Windows: runs flash-all.bat (via cmd.exe)
+ * - Mac and Linux: runs flash-all.sh (via sh)
+ * Uses bundle path; passes device serial via FASTBOOT_SERIAL so the script flashes the correct device.
  */
 function runFlashScript(bundlePath, deviceSerial, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -1131,11 +1133,12 @@ function runFlashScript(bundlePath, deviceSerial, progressCallback) {
 }
 
 /**
- * Execute flash locally: try flash-all.bat / flash-all.sh first; fallback to GrapheneFlasher
+ * Execute flash locally: run bundle script from downloaded bundle dir first, then fallback to GrapheneFlasher.
+ * Windows: flash-all.bat | Mac/Linux: flash-all.sh
  */
 async function executeLocalFlash(deviceSerial, bundlePath, skipUnlock, progressCallback) {
   try {
-    // Prefer running the bundle script (flash-all.bat on Windows, flash-all.sh on Mac)
+    // Run the bundle script from the downloaded bundle directory (flash-all.bat on Windows, flash-all.sh on Mac/Linux)
     const scriptPathWin = path.join(bundlePath, 'flash-all.bat');
     const scriptPathMac = path.join(bundlePath, 'flash-all.sh');
     const hasScript = fsSync.existsSync(scriptPathWin) || fsSync.existsSync(scriptPathMac);
