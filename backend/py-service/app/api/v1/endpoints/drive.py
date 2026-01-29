@@ -129,6 +129,28 @@ class FileListResponse(BaseModel):
     offset: int
 
 
+class EncryptedFileDownloadResponse(BaseModel):
+    """Response for downloading encrypted file with key for client-side decryption"""
+    file_id: str
+    filename: str
+    size: int
+    content_type: Optional[str] = None
+    encrypted_content: Dict[str, str] = Field(
+        ...,
+        description="Encrypted file content. Format: {ciphertext, nonce, tag}. Decrypt on client using device key."
+    )
+    encrypted_content_key: Dict[str, str] = Field(
+        ...,
+        description="Encrypted content key. Format: {ciphertext, nonce, tag}. Decrypt on client using device key to get the content key, then decrypt encrypted_content."
+    )
+    passcode_protected: bool
+    created_at: str
+    expires_at: Optional[str] = None
+    message: str = Field(
+        default="File downloaded. Decrypt encrypted_content_key using your device key, then decrypt encrypted_content using the decrypted content key."
+    )
+
+
 class FileUploadEncryptedRequest(BaseModel):
     """File upload request with pre-encrypted content (client-side encryption)"""
     filename: str = Field(..., description="Original filename")
@@ -140,10 +162,12 @@ class FileUploadEncryptedRequest(BaseModel):
         ...,
         description="Encrypted content key (encrypted with user's device key on client-side). Format: {ciphertext, nonce, tag}"
     )
-    content_type: Optional[str] = Field(None, description="File content type")
+    content_type: Optional[str] = Field(None, description="File content type (e.g., application/pdf, application/msword, text/plain, etc.)")
     size: int = Field(..., description="Original file size in bytes")
     passcode: Optional[str] = Field(None, description="Optional passcode for additional protection")
-    expires_in_hours: Optional[int] = Field(None, ge=1, le=8760, description="Expiration time in hours")
+    never_expire: bool = Field(False, description="If True, file never expires. If False, use expires_in_hours or expires_in_days")
+    expires_in_hours: Optional[int] = Field(None, ge=1, le=8760, description="Expiration time in hours (only used if never_expire=False)")
+    expires_in_days: Optional[int] = Field(None, ge=1, le=365, description="Expiration time in days (only used if never_expire=False, takes precedence over expires_in_hours)")
 
 
 def generate_file_id() -> str:
@@ -452,7 +476,9 @@ async def remove_user_file(user_email: str, file_id: str) -> None:
 async def upload_file(
     file: UploadFile = File(...),
     passcode: Optional[str] = Form(None),
-    expires_in_hours: Optional[int] = Form(None, ge=1, le=8760),
+    never_expire: bool = Form(False, description="If True, file never expires"),
+    expires_in_hours: Optional[int] = Form(None, ge=1, le=8760, description="Expiration in hours (only if never_expire=False)"),
+    expires_in_days: Optional[int] = Form(None, ge=1, le=365, description="Expiration in days (only if never_expire=False, takes precedence over hours)"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
@@ -495,6 +521,14 @@ async def upload_file(
         drive_service = get_drive_service_mongodb()
         user_email = current_user.get("email")
         
+        # Calculate expiration based on never_expire flag
+        expires_in_hours_calculated = None
+        if not never_expire:
+            if expires_in_days:
+                expires_in_hours_calculated = expires_in_days * 24
+            elif expires_in_hours:
+                expires_in_hours_calculated = expires_in_hours
+        
         # Encrypt and store file in MongoDB with multi-layer encryption
         result = await drive_service.encrypt_and_store_file(
             file_content=file_content,
@@ -503,7 +537,8 @@ async def upload_file(
             owner_email=user_email,
             content_type=file.content_type,
             passcode=passcode,
-            expires_in_hours=expires_in_hours,
+            expires_in_hours=expires_in_hours_calculated,
+            never_expire=never_expire,
         )
         
         file_id = result["file_id"]
@@ -511,8 +546,8 @@ async def upload_file(
         
         # Calculate expiration for response
         expires_at = None
-        if expires_in_hours:
-            expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+        if not never_expire and expires_in_hours_calculated:
+            expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours_calculated)
         
         # Update user storage usage
         await increment_user_storage(user_email, file_size)
@@ -930,6 +965,9 @@ async def upload_encrypted_file(
     """
     Upload a file that is already encrypted on the client-side.
     
+    Supports ALL file types: PDF, Word documents (.doc, .docx), text files (.txt),
+    images (.png, .jpg, .gif, etc.), spreadsheets (.xls, .xlsx), and any other file format.
+    
     IMPORTANT: This endpoint expects pre-encrypted content from the client.
     The client must:
     1. Encrypt the file content with a random key
@@ -944,6 +982,10 @@ async def upload_encrypted_file(
     Only the user (with their device key) can decrypt the file.
     
     This ensures true end-to-end encryption where the server cannot access file contents.
+    
+    Expiration Options:
+    - never_expire=True: File never expires (no expiration date)
+    - never_expire=False: Use expires_in_days (takes precedence) or expires_in_hours
     """
     try:
         user_email = current_user.get("email")
@@ -994,19 +1036,28 @@ async def upload_encrypted_file(
             salt_base64 = base64.b64encode(salt).decode("utf-8")
             
             expires_in_seconds = None
-            if file_data.expires_in_hours:
-                expires_in_seconds = int(file_data.expires_in_hours * 3600)
+            if not file_data.never_expire:
+                if file_data.expires_in_days:
+                    expires_in_seconds = int(file_data.expires_in_days * 24 * 3600)
+                elif file_data.expires_in_hours:
+                    expires_in_seconds = int(file_data.expires_in_hours * 3600)
             
             await store_passcode_salt(file_id, salt_base64, expires_in_seconds)
         
-        # Calculate expiration
+        # Calculate expiration based on never_expire flag
         expires_in_seconds = None
         expires_at = None
-        if file_data.expires_in_hours:
-            expires_at = datetime.utcnow() + timedelta(hours=file_data.expires_in_hours)
-            expires_in_seconds = int(file_data.expires_in_hours * 3600)
+        if not file_data.never_expire:
+            if file_data.expires_in_days:
+                expires_at = datetime.utcnow() + timedelta(days=file_data.expires_in_days)
+                expires_in_seconds = int(file_data.expires_in_days * 24 * 3600)
+            elif file_data.expires_in_hours:
+                expires_at = datetime.utcnow() + timedelta(hours=file_data.expires_in_hours)
+                expires_in_seconds = int(file_data.expires_in_hours * 3600)
         
         # Store encrypted file data (server never decrypts)
+        # Note: For encrypted uploads, we store in MongoDB via drive service
+        # But for now, we'll use the existing Redis storage for compatibility
         await store_encrypted_file(
             file_id=file_id,
             encrypted_content=file_data.encrypted_content,
@@ -1212,5 +1263,128 @@ async def list_files(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list files"
+        )
+
+
+@router.get("/file/{file_id}/download-encrypted", response_model=EncryptedFileDownloadResponse)
+async def download_encrypted_file(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Download encrypted file with encrypted content key for client-side decryption.
+    
+    This endpoint requires authentication and returns both the encrypted file content
+    and the encrypted content key. The client must decrypt both on the device:
+    
+    1. First, decrypt encrypted_content_key using the device key stored locally
+    2. Then, decrypt encrypted_content using the decrypted content key
+    
+    If the device key is not present locally, the file cannot be decrypted.
+    
+    Requires:
+    - Authentication (Bearer token)
+    - File ownership (user must own the file)
+    
+    Returns:
+    - encrypted_content: Encrypted file content (multi-layer encrypted)
+    - encrypted_content_key: Encrypted content key (encrypted with user's device key)
+    
+    The client is responsible for:
+    - Storing the device key securely on the device
+    - Decrypting encrypted_content_key using device key
+    - Decrypting encrypted_content using the decrypted content key
+    """
+    try:
+        # Authentication is required (enforced by get_current_user dependency)
+        user_email = current_user.get("email")
+        if not user_email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required"
+            )
+        
+        # Verify ownership
+        if not await check_ownership(file_id, user_email):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You don't own this file"
+            )
+        
+        # Get file metadata
+        metadata = await get_file_metadata(file_id)
+        if not metadata:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found or expired"
+            )
+        
+        # Check if file has expired
+        expires_at = metadata.get("expires_at")
+        if expires_at:
+            try:
+                if isinstance(expires_at, str):
+                    expires_at_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                else:
+                    expires_at_dt = expires_at
+                if datetime.utcnow() > expires_at_dt:
+                    raise HTTPException(
+                        status_code=status.HTTP_410_GONE,
+                        detail="File has expired"
+                    )
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error parsing expiration date: {e}")
+        
+        # Get encrypted file data from MongoDB
+        file_data = await get_encrypted_file(file_id)
+        if not file_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File data not found or expired"
+            )
+        
+        encrypted_content = file_data.get("encrypted_content")
+        encrypted_content_key = file_data.get("encrypted_content_key")
+        
+        if not encrypted_content or not encrypted_content_key:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="File encryption data is incomplete"
+            )
+        
+        # Ensure encrypted_content and encrypted_content_key are in the correct format
+        # They should be dictionaries with ciphertext, nonce, tag
+        if not isinstance(encrypted_content, dict) or not isinstance(encrypted_content_key, dict):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid encryption data format"
+            )
+        
+        logger.info(
+            f"Encrypted file downloaded for client-side decryption: "
+            f"id={file_id[:8]}..., filename={metadata.get('filename')}, "
+            f"user={user_email}"
+        )
+        
+        return EncryptedFileDownloadResponse(
+            file_id=file_id,
+            filename=metadata.get("filename", "unnamed"),
+            size=metadata.get("size", 0),
+            content_type=metadata.get("content_type"),
+            encrypted_content=encrypted_content,
+            encrypted_content_key=encrypted_content_key,
+            passcode_protected=metadata.get("passcode_protected", False),
+            created_at=metadata.get("created_at", datetime.utcnow().isoformat()),
+            expires_at=expires_at,
+            message="File downloaded. Decrypt encrypted_content_key using your device key, then decrypt encrypted_content using the decrypted content key."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download encrypted file: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to download encrypted file: {str(e)}"
         )
 

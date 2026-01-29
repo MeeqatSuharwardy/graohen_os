@@ -65,6 +65,16 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
     device_id: Optional[str] = Field(None, max_length=255, description="Device identifier for device binding")
+    device_key_fingerprint: Optional[str] = Field(
+        None,
+        min_length=32,
+        max_length=128,
+        description="SHA-256 hash/fingerprint of the device encryption key (stored/replaced on every login)"
+    )
+    device_key_algorithm: Optional[str] = Field(
+        default="AES-256-GCM",
+        description="Encryption algorithm used for device key"
+    )
 
 
 class TokenResponse(BaseModel):
@@ -412,6 +422,13 @@ async def login(
     Login with email and password.
     
     Returns access and refresh tokens.
+    
+    If device_key_fingerprint is provided, it will be stored or replaced
+    on every successful login. This ensures the device encryption key
+    fingerprint is always up-to-date.
+    
+    Note: Only the fingerprint/hash is stored, never the actual encryption key.
+    The actual key remains on the device and is never transmitted to the server.
     """
     security = get_security_service()
     client_ip = request.client.host if request.client else "unknown"
@@ -533,6 +550,43 @@ async def login(
             expires_in=refresh_token_expires,
         )
         
+        # Store or replace device encryption key fingerprint on every login
+        if credentials.device_key_fingerprint and device_id:
+            try:
+                redis = await get_redis()
+                device_key_fingerprint_key = f"{REDIS_DEVICE_KEY_FINGERPRINT_PREFIX}{user['id']}:{device_id}"
+                
+                fingerprint_data = {
+                    "device_id": device_id,
+                    "key_fingerprint": credentials.device_key_fingerprint,
+                    "key_algorithm": credentials.device_key_algorithm or "AES-256-GCM",
+                    "registered_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "user_email": user["email"],
+                }
+                
+                import json
+                # Store or replace (set will overwrite if exists)
+                await redis.set(
+                    device_key_fingerprint_key,
+                    json.dumps(fingerprint_data)
+                )
+                
+                # Also store in device list for user
+                user_devices_key = f"{REDIS_DEVICE_PREFIX}{user['id']}:devices"
+                await redis.sadd(user_devices_key, device_id)
+                
+                logger.info(
+                    f"Device encryption key fingerprint stored/replaced on login: "
+                    f"user={credentials.email}, device_id={device_id[:8]}..."
+                )
+            except Exception as e:
+                # Log error but don't fail login if device key storage fails
+                logger.warning(
+                    f"Failed to store device key fingerprint on login (non-fatal): {e}",
+                    exc_info=True
+                )
+        
         # Log successful login
         await security.log_security_event(
             SecurityEvent.LOGIN_SUCCESS,
@@ -540,7 +594,10 @@ async def login(
             user_id=user["id"],
             ip_address=client_ip,
             action="login",
-            metadata={"device_id": credentials.device_id},
+            metadata={
+                "device_id": device_id,
+                "device_key_stored": bool(credentials.device_key_fingerprint),
+            },
             success=True,
         )
         

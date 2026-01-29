@@ -51,11 +51,23 @@ class DriveServiceMongoDB:
         content_type: Optional[str] = None,
         passcode: Optional[str] = None,
         expires_in_hours: Optional[int] = None,
+        never_expire: bool = False,
     ) -> Dict[str, Any]:
         """
         Encrypt file with multi-layer encryption and store in MongoDB.
         
         Uses 3 layers of encryption for maximum security.
+        Supports all file types (PDF, Word, text, images, etc.).
+        
+        Args:
+            file_content: Raw file content bytes
+            filename: Original filename
+            file_size: File size in bytes
+            owner_email: Email of file owner
+            content_type: MIME type (e.g., application/pdf, application/msword, text/plain, image/png, etc.)
+            passcode: Optional passcode for additional protection
+            expires_in_hours: Expiration time in hours (only used if never_expire=False)
+            never_expire: If True, file never expires (expires_at will be None)
         """
         try:
             # Generate file ID
@@ -107,7 +119,7 @@ class DriveServiceMongoDB:
             
             # Calculate expiration
             expires_at = None
-            if expires_in_hours:
+            if not never_expire and expires_in_hours:
                 expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
             
             # Store in MongoDB

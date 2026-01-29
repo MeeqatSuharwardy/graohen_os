@@ -28,56 +28,19 @@ class DeviceListRequest(BaseModel):
 @router.get("")
 @router.get("/")
 async def list_devices():
-    """List all connected devices"""
-    import logging
-    import asyncio
-    logger = logging.getLogger(__name__)
-    
-    try:
-        logger.info("Listing devices - checking ADB and Fastboot...")
-        
-        # Run get_devices in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        devices = await loop.run_in_executor(None, get_devices)
-        logger.info(f"Found {len(devices)} device(s): {[d['serial'] for d in devices]}")
-        
-        # Try to identify each device (with timeout handling)
-        # Use asyncio.gather for parallel identification with timeout
-        async def identify_device_async(device):
-            if device["state"] in ["device", "fastboot"]:
-                try:
-                    logger.debug(f"Identifying device {device['serial']} in {device['state']} state...")
-                    # Run identify_device in executor with timeout
-                    identification = await asyncio.wait_for(
-                        loop.run_in_executor(None, identify_device, device["serial"]),
-                        timeout=5.0
-                    )
-                    if identification:
-                        device.update(identification)
-                        logger.info(f"Device {device['serial']} identified as {identification.get('codename', 'unknown')}")
-                except asyncio.TimeoutError:
-                    logger.warning(f"Device {device['serial']} identification timed out")
-                except Exception as e:
-                    # Log but don't fail - device list should still be returned
-                    logger.warning(f"Could not identify device {device['serial']}: {e}", exc_info=True)
-            return device
-        
-        # Identify devices in parallel with timeout
-        if devices:
-            try:
-                devices = await asyncio.wait_for(
-                    asyncio.gather(*[identify_device_async(d) for d in devices]),
-                    timeout=10.0
-                )
-            except asyncio.TimeoutError:
-                logger.warning("Device identification timed out, returning devices without full identification")
-        
-        return devices
-        
-    except Exception as e:
-        logger.error(f"Error listing devices: {e}", exc_info=True)
-        # Return empty list on error rather than crashing
-        return []
+    """List all connected devices (DISABLED: backend does not look for ADB/fastboot devices - returns empty list)"""
+    # Backend device detection disabled - do not call ADB/fastboot
+    # Frontend/electron should use WebADB or local adb for device detection.
+    logger.info("Listing devices - backend device detection disabled, returning empty list")
+    return []
+    # try:
+    #     logger.info("Listing devices - checking ADB and Fastboot...")
+    #     loop = asyncio.get_event_loop()
+    #     devices = await loop.run_in_executor(None, get_devices)
+    #     ...
+    # except Exception as e:
+    #     logger.error(f"Error listing devices: {e}", exc_info=True)
+    #     return []
 
 
 @router.post("")
@@ -202,26 +165,13 @@ async def reboot_to_bootloader(device_id: str):
 
 @router.get("/debug/fastboot")
 async def debug_fastboot_devices():
-    """Debug endpoint to check fastboot device detection"""
-    try:
-        # Run fastboot devices command directly
-        result = run_fastboot_command(["devices"], timeout=15)
-        
-        if result is None:
-            return {
-                "error": "Fastboot command returned None - fastboot may not be installed or accessible",
-                "fastboot_path": settings.FASTBOOT_PATH
-            }
-        
-        return {
-            "returncode": result.returncode,
-            "stdout": result.stdout if result.stdout else "",
-            "stderr": result.stderr if result.stderr else "",
-            "stdout_raw": repr(result.stdout) if result.stdout else "None",
-            "stderr_raw": repr(result.stderr) if result.stderr else "None",
-            "detected_devices": get_devices(),
-        }
-    except Exception as e:
-        logger.error(f"Error in debug_fastboot_devices: {e}", exc_info=True)
-        return {"error": str(e), "traceback": str(e.__traceback__)}
+    """Debug endpoint to check fastboot device detection (DISABLED: backend does not run fastboot)"""
+    # Backend fastboot device detection disabled - do not call fastboot
+    # result = run_fastboot_command(["devices"], timeout=15)
+    # ...
+    return {
+        "disabled": True,
+        "message": "Fastboot device detection is disabled on backend. Use frontend/electron or local tools for device detection.",
+        "fastboot_path": settings.FASTBOOT_PATH,
+    }
 

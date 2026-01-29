@@ -83,7 +83,9 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "../assets/icon.icns"
+      "arch": ["x64", "arm64"],
+      "icon": "../assets/icon.icns",
+      "category": "public.app-category.utilities"
     },
     "linux": {
       "target": "AppImage",

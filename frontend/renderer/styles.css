@@ -1,8 +1,86 @@
 /**
  * FlashDash Client - Stylesheet
- * Modern, clean UI for device flashing interface
+ * Supports: Light, Dark, and Contrast themes
  */
 
+/* ========== Theme Variables ========== */
+:root,
+[data-theme="dark"] {
+  --bg-page: #0a0a0a;
+  --bg-card: #141414;
+  --bg-input: #0f0f0f;
+  --bg-card-hover: #1a1a2e;
+  --bg-selected: #1e293b;
+  --text-primary: #f0f0f0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #888;
+  --border: #333;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-glow: rgba(37, 99, 235, 0.5);
+  --success-bg: #064e3b;
+  --success-text: #6ee7b7;
+  --error-bg: #7f1d1d;
+  --error-text: #fca5a5;
+  --warning-bg: #78350f;
+  --warning-text: #fcd34d;
+  --info-bg: #1e3a5f;
+  --info-text: #93c5fd;
+  --log-bg: #1e1e1e;
+  --progress-track: #1a1a1a;
+}
+
+[data-theme="light"] {
+  --bg-page: #f5f5f5;
+  --bg-card: #ffffff;
+  --bg-input: #ffffff;
+  --bg-card-hover: #f0f4ff;
+  --bg-selected: #e8eeff;
+  --text-primary: #1a1a1a;
+  --text-secondary: #555;
+  --text-muted: #666;
+  --border: #ddd;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-glow: rgba(37, 99, 235, 0.25);
+  --success-bg: #d1fae5;
+  --success-text: #065f46;
+  --error-bg: #fee2e2;
+  --error-text: #991b1b;
+  --warning-bg: #fef3c7;
+  --warning-text: #92400e;
+  --info-bg: #dbeafe;
+  --info-text: #1e40af;
+  --log-bg: #f8f8f8;
+  --progress-track: #e5e5e5;
+}
+
+[data-theme="contrast"] {
+  --bg-page: #000000;
+  --bg-card: #0d0d0d;
+  --bg-input: #000000;
+  --bg-card-hover: #1a1a1a;
+  --bg-selected: #262626;
+  --text-primary: #ffffff;
+  --text-secondary: #e0e0e0;
+  --text-muted: #b0b0b0;
+  --border: #ffffff;
+  --accent: #00ff00;
+  --accent-hover: #00cc00;
+  --accent-glow: rgba(0, 255, 0, 0.4);
+  --success-bg: #003300;
+  --success-text: #00ff00;
+  --error-bg: #330000;
+  --error-text: #ff4444;
+  --warning-bg: #332200;
+  --warning-text: #ffff00;
+  --info-bg: #000033;
+  --info-text: #4488ff;
+  --log-bg: #000000;
+  --progress-track: #222;
+}
+
+/* ========== Base ========== */
 * {
   margin: 0;
   padding: 0;
@@ -11,11 +89,12 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  background: #000000;
+  background: var(--bg-page);
   min-height: 100vh;
   padding: 0;
-  color: #e0e0e0;
+  color: var(--text-primary);
   margin: 0;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 .container {
@@ -24,6 +103,33 @@ body {
   padding: 30px 20px;
 }
 
+/* ========== Theme Switcher ========== */
+.theme-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 8px 0;
+}
+
+.theme-bar label {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.theme-bar select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+/* ========== Header ========== */
 header {
   text-align: center;
   margin-bottom: 40px;
@@ -32,13 +138,13 @@ header {
 header h1 {
   font-size: 2.2em;
   margin-bottom: 8px;
-  color: #ffffff;
+  color: var(--text-primary);
   font-weight: 700;
 }
 
 .subtitle {
   font-size: 1em;
-  color: #a0a0a0;
+  color: var(--text-secondary);
   font-weight: 400;
 }
 
@@ -49,17 +155,19 @@ main {
 }
 
 .card {
-  background: white;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 25px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .card h2 {
-  color: #667eea;
+  color: var(--accent);
   margin-bottom: 20px;
   font-size: 1.5em;
-  border-bottom: 2px solid #f0f0f0;
+  border-bottom: 2px solid var(--border);
   padding-bottom: 10px;
 }
 
@@ -83,32 +191,32 @@ main {
 }
 
 .btn-primary {
-  background: #2563eb;
+  background: var(--accent);
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #1d4ed8;
-  box-shadow: 0 0 12px rgba(37, 99, 235, 0.5);
+  background: var(--accent-hover);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 .btn-secondary {
-  background: #475569;
+  background: var(--text-muted);
   color: white;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #334155;
+  filter: brightness(1.1);
 }
 
 .btn-danger {
-  background: #2563eb;
+  background: var(--accent);
   color: white;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #1d4ed8;
-  box-shadow: 0 0 12px rgba(37, 99, 235, 0.5);
+  background: var(--accent-hover);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 .btn-small {
@@ -136,30 +244,30 @@ main {
 }
 
 .status-message.info {
-  background: #1e3a5f;
-  color: #93c5fd;
-  border-left: 4px solid #2563eb;
+  background: var(--info-bg);
+  color: var(--info-text);
+  border-left: 4px solid var(--accent);
   display: block;
 }
 
 .status-message.success {
-  background: #064e3b;
-  color: #6ee7b7;
-  border-left: 4px solid #10b981;
+  background: var(--success-bg);
+  color: var(--success-text);
+  border-left: 4px solid var(--success-text);
   display: block;
 }
 
 .status-message.error {
-  background: #7f1d1d;
-  color: #fca5a5;
-  border-left: 4px solid #ef4444;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-left: 4px solid var(--error-text);
   display: block;
 }
 
 .status-message.warning {
-  background: #78350f;
-  color: #fcd34d;
-  border-left: 4px solid #f59e0b;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border-left: 4px solid var(--warning-text);
   display: block;
 }
 
@@ -171,28 +279,28 @@ main {
 }
 
 .device-card {
-  border: 1px solid #333;
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 16px;
   transition: all 0.2s ease;
   cursor: pointer;
-  background: #0f0f0f;
+  background: var(--bg-input);
 }
 
 .device-card:hover {
-  border-color: #2563eb;
-  background: #1a1a2e;
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
 }
 
 .device-card.selected {
-  border-color: #2563eb;
-  background: #1e293b;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+  border-color: var(--accent);
+  background: var(--bg-selected);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .device-card.error {
-  border-color: #ef4444;
-  background: #2a1a1a;
+  border-color: var(--error-text);
+  background: var(--error-bg);
 }
 
 .device-header {
@@ -205,7 +313,7 @@ main {
 .device-name {
   font-size: 1.2em;
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 .device-state {
@@ -216,18 +324,18 @@ main {
 }
 
 .device-state.device {
-  background: #064e3b;
-  color: #6ee7b7;
+  background: var(--success-bg);
+  color: var(--success-text);
 }
 
 .device-state.fastboot {
-  background: #78350f;
-  color: #fcd34d;
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 .device-state.offline {
-  background: #7f1d1d;
-  color: #fca5a5;
+  background: var(--error-bg);
+  color: var(--error-text);
 }
 
 .device-details {
@@ -236,7 +344,7 @@ main {
   gap: 10px;
   margin-top: 10px;
   font-size: 0.9em;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .device-detail-item {
@@ -246,23 +354,23 @@ main {
 
 .device-detail-label {
   font-weight: 600;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .device-detail-value {
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 /* Selected Device Info */
 .selected-device-info {
-  background: #1e293b;
-  border-left: 3px solid #2563eb;
+  background: var(--bg-selected);
+  border-left: 3px solid var(--accent);
   padding: 14px;
   border-radius: 6px;
   margin-bottom: 20px;
   font-size: 0.9em;
   line-height: 1.6;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 /* Form Controls */
@@ -274,39 +382,39 @@ main {
   display: block;
   margin-bottom: 8px;
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 .form-control {
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid #333;
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 0.95em;
   transition: border-color 0.2s ease;
-  background: #0f0f0f;
-  color: #e0e0e0;
+  background: var(--bg-input);
+  color: var(--text-primary);
 }
 
 .form-control:focus {
   outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .form-group input[type="checkbox"] {
   width: 18px;
   height: 18px;
   cursor: pointer;
-  accent-color: #2563eb;
+  accent-color: var(--accent);
 }
 
 #download-status {
   font-size: 0.9em;
   padding: 10px;
   border-radius: 6px;
-  background: #1e293b;
-  border: 1px solid #333;
+  background: var(--bg-selected);
+  border: 1px solid var(--border);
 }
 
 #download-status div {
@@ -319,22 +427,22 @@ main {
 
 /* Warning Box */
 .warning-box {
-  background: #78350f;
-  border: 1px solid #f59e0b;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-text);
   border-radius: 6px;
   padding: 12px;
   margin-bottom: 20px;
 }
 
 .warning-box strong {
-  color: #fcd34d;
+  color: var(--warning-text);
   display: block;
   margin-bottom: 6px;
   font-size: 0.9em;
 }
 
 .warning-box p {
-  color: #fcd34d;
+  color: var(--warning-text);
   margin: 0;
   font-size: 0.9em;
   line-height: 1.5;
@@ -355,7 +463,7 @@ main {
 .job-id {
   font-family: 'Courier New', monospace;
   font-size: 0.9em;
-  color: #888;
+  color: var(--text-muted);
   margin-bottom: 10px;
 }
 
@@ -364,28 +472,29 @@ main {
   font-weight: 600;
   padding: 10px;
   border-radius: 6px;
-  background: #1e293b;
-  color: #e0e0e0;
+  background: var(--bg-selected);
+  color: var(--text-primary);
 }
 
 .job-status.running {
-  background: #1e3a5f;
-  color: #93c5fd;
+  background: var(--info-bg);
+  color: var(--info-text);
 }
 
 .job-status.success {
-  background: #064e3b;
-  color: #6ee7b7;
+  background: var(--success-bg);
+  color: var(--success-text);
 }
 
 .job-status.error {
-  background: #7f1d1d;
-  color: #fca5a5;
+  background: var(--error-bg);
+  color: var(--error-text);
 }
 
 /* Log Output */
 .log-container {
-  background: #1e1e1e;
+  background: var(--log-bg);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 15px;
   max-height: 400px;
@@ -395,7 +504,7 @@ main {
 }
 
 .log-output {
-  color: #d4d4d4;
+  color: var(--text-primary);
   white-space: pre-wrap;
   word-wrap: break-word;
 }
@@ -406,19 +515,19 @@ main {
 }
 
 .log-output .log-line.error {
-  color: #f48771;
+  color: var(--error-text);
 }
 
 .log-output .log-line.success {
-  color: #89d185;
+  color: var(--success-text);
 }
 
 .log-output .log-line.info {
-  color: #4ec9b0;
+  color: var(--info-text);
 }
 
 .log-output .log-line.warning {
-  color: #dcdcaa;
+  color: var(--warning-text);
 }
 
 /* Download Progress */
@@ -429,7 +538,7 @@ main {
 .progress-bar {
   width: 100%;
   height: 24px;
-  background: #e0e0e0;
+  background: var(--progress-track);
   border-radius: 12px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -437,44 +546,39 @@ main {
 
 .progress-fill {
   height: 100%;
-  background: #2563eb;
+  background: var(--accent);
   transition: width 0.3s ease;
   width: 0%;
 }
 
 #progress-text {
   font-size: 0.9em;
-  color: #888;
+  color: var(--text-muted);
   font-weight: 600;
-}
-
-.progress-bar {
-  background: #1a1a1a;
 }
 
 /* Footer */
 footer {
   text-align: center;
-  color: #888;
+  color: var(--text-muted);
   margin-top: 40px;
   padding: 20px;
   font-size: 0.85em;
 }
 
 footer a {
-  color: #60a5fa;
+  color: var(--accent);
   text-decoration: none;
 }
 
 footer a:hover {
   text-decoration: underline;
-  color: #93c5fd;
 }
 
 .security-note {
   margin-top: 8px;
   font-size: 0.85em;
-  color: #666;
+  color: var(--text-muted);
 }
 
 /* Loading Spinner */
@@ -482,9 +586,9 @@ footer a:hover {
   display: inline-block;
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid var(--border);
   border-radius: 50%;
-  border-top-color: white;
+  border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
 
@@ -507,16 +611,16 @@ footer a:hover {
 }
 
 .apk-card {
-  background: #1a1a1a;
-  border: 1px solid #333;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 16px;
   transition: all 0.2s ease;
 }
 
 .apk-card:hover {
-  border-color: #444;
-  background: #1f1f1f;
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
 }
 
 .apk-header {
@@ -531,7 +635,7 @@ footer a:hover {
   align-items: center;
   gap: 8px;
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 1em;
 }
 
@@ -540,7 +644,7 @@ footer a:hover {
 }
 
 .apk-size {
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.9em;
   font-weight: 500;
 }
@@ -557,12 +661,12 @@ footer a:hover {
 }
 
 .apk-detail-label {
-  color: #888;
+  color: var(--text-muted);
   font-weight: 500;
 }
 
 .apk-detail-value {
-  color: #b0b0b0;
+  color: var(--text-secondary);
 }
 
 .apk-actions {
@@ -583,10 +687,6 @@ footer a:hover {
 .install-apk-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.install-apk-btn:disabled:hover {
-  background: #2563eb;
 }
 
 /* Responsive */

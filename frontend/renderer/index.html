@@ -9,6 +9,14 @@
 </head>
 <body>
   <div class="container">
+    <div class="theme-bar">
+      <label for="theme-select">Theme:</label>
+      <select id="theme-select" aria-label="Theme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+        <option value="contrast">Contrast</option>
+      </select>
+    </div>
     <header>
       <h1>FlashDash</h1>
       <p class="subtitle">Android OS Flashing Client</p>
@@ -40,10 +48,16 @@
         <div class="selected-device-info" id="selected-device-info"></div>
         
         <div class="form-group">
-          <label for="version-select">OS Version</label>
+          <label for="version-select">OS Version / Image</label>
           <select id="version-select" class="form-control">
             <option value="">Use latest available</option>
           </select>
+          <div style="margin-top: 8px;">
+            <button type="button" id="load-all-images-btn" class="btn btn-small btn-secondary">
+              Load all device images
+            </button>
+            <span style="font-size: 0.85em; color: var(--text-muted); margin-left: 8px;">Select correct image for your device (e.g. Pixel 7 = panther, 7 Pro = cheetah)</span>
+          </div>
         </div>
 
         <div class="form-group">

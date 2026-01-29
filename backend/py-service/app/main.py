@@ -179,20 +179,22 @@ async def health_check():
 
 @app.get("/tools/check")
 async def check_tools():
-    """Check if ADB and Fastboot are available"""
-    from app.utils.tools import check_tool_availability
-    
-    adb_ok = check_tool_availability(settings.ADB_PATH)
-    fastboot_ok = check_tool_availability(settings.FASTBOOT_PATH)
-    
+    """Check if ADB and Fastboot are available (DISABLED: backend does not look for ADB/fastboot devices)"""
+    # Backend device detection disabled - do not call ADB/fastboot
+    # adb_ok = check_tool_availability(settings.ADB_PATH)
+    # fastboot_ok = check_tool_availability(settings.FASTBOOT_PATH)
     return {
         "adb": {
-            "available": adb_ok,
+            "available": False,
             "path": settings.ADB_PATH,
+            "disabled": True,
+            "message": "ADB device detection is disabled on backend",
         },
         "fastboot": {
-            "available": fastboot_ok,
+            "available": False,
             "path": settings.FASTBOOT_PATH,
+            "disabled": True,
+            "message": "Fastboot device detection is disabled on backend",
         },
     }
 

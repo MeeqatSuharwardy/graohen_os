@@ -22,11 +22,46 @@ router = APIRouter()
 # Store download progress in memory (use Redis in production)
 download_progress: Dict[str, Dict[str, Any]] = {}
 
+# GrapheneOS device codename -> display name (Pixel 7 = panther, 7 Pro = cheetah, etc.)
+DEVICE_DISPLAY_NAMES = {
+    "panther": "Pixel 7",
+    "cheetah": "Pixel 7 Pro",
+    "lynx": "Pixel 7a",
+    "tangor": "Pixel Tablet",
+    "felix": "Pixel Fold",
+    "shiba": "Pixel 8",
+    "husky": "Pixel 8 Pro",
+    "akita": "Pixel 8a",
+}
+
 
 @router.post("/index")
 async def index_bundles_endpoint():
     """Index all available bundles"""
     return index_bundles()
+
+
+@router.get("/list-all")
+async def list_all_downloadable():
+    """
+    List all downloadable bundles for user selection.
+    Returns every codename with device display name and available versions,
+    so the frontend can show a dropdown (e.g. Pixel 7 / panther, Pixel 7 Pro / cheetah)
+    and let the user pick the correct image to download and flash.
+    """
+    indexed = index_bundles()
+    result = []
+    for codename, versions in indexed.items():
+        display_name = DEVICE_DISPLAY_NAMES.get(codename, codename)
+        for b in versions:
+            result.append({
+                "codename": codename,
+                "deviceName": b.get("deviceName") or display_name,
+                "version": b.get("version"),
+                "path": b.get("path"),
+                "downloadUrl": b.get("downloadUrl"),
+            })
+    return {"bundles": result, "byCodename": indexed}
 
 
 @router.get("/for/{codename}")

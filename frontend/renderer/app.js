@@ -46,6 +46,7 @@ const refreshApksBtn = document.getElementById('refresh-apks-btn');
 const uploadApkBtn = document.getElementById('upload-apk-btn');
 const apkStatus = document.getElementById('apk-status');
 const apksList = document.getElementById('apks-list');
+const loadAllImagesBtn = document.getElementById('load-all-images-btn');
 
 /**
  * Show status message
@@ -278,6 +279,49 @@ async function loadAvailableVersions() {
 }
 
 /**
+ * Load all device images from backend (GET /bundles/list-all) so user can select correct image (e.g. Pixel 7 = panther, 7 Pro = cheetah)
+ */
+async function loadAllImages() {
+  try {
+    showStatus('Loading all device images...', 'info');
+    const response = await fetch(`${BACKEND_URL}/bundles/list-all`);
+    if (!response.ok) throw new Error(`Failed to load list: ${response.statusText}`);
+    const data = await response.json();
+    const bundles = data.bundles || [];
+    versionSelect.innerHTML = '<option value="">Select image to download/flash...</option>';
+    bundleVersionSelect.innerHTML = '<option value="">Select image...</option>';
+    bundleMetadata = {};
+    bundles.forEach(b => {
+      const value = `${b.codename}${LIST_ALL_VALUE_SEP}${b.version}`;
+      const label = `${b.deviceName || b.codename} (${b.codename}) - ${b.version}`;
+      const opt1 = document.createElement('option');
+      opt1.value = value;
+      opt1.textContent = label;
+      versionSelect.appendChild(opt1);
+      const opt2 = document.createElement('option');
+      opt2.value = value;
+      opt2.textContent = label;
+      bundleVersionSelect.appendChild(opt2);
+      bundleMetadata[value] = { codename: b.codename, version: b.version, deviceName: b.deviceName };
+    });
+    if (bundles.length > 0) {
+      downloadBundleBtn.disabled = false;
+      showStatus(`Loaded ${bundles.length} image(s). Select device then image, then flash.`, 'success');
+    } else {
+      showStatus('No images available from server.', 'warning');
+    }
+    updateDownloadCheckboxState();
+  } catch (error) {
+    console.error('Failed to load all images:', error);
+    showStatus(`Failed to load all images: ${error.message}`, 'error');
+  }
+}
+
+if (loadAllImagesBtn) {
+  loadAllImagesBtn.addEventListener('click', loadAllImages);
+}
+
+/**
  * Send detected devices to backend
  */
 async function registerDevices() {
@@ -328,15 +372,20 @@ async function startFlashing(unlockBootloader = false) {
   unlockFlashBtn.disabled = true;
 
   try {
-    const version = versionSelect.value || null;
+    const versionRaw = versionSelect.value || null;
+    let codenameForBundle = selectedDevice.codename;
+    let versionForBundle = versionRaw;
+    if (versionRaw && versionRaw.includes(LIST_ALL_VALUE_SEP)) {
+      [codenameForBundle, versionForBundle] = versionRaw.split(LIST_ALL_VALUE_SEP);
+    }
 
     // Step 1: Download and extract bundle locally (REQUIRED for local flash)
-    if (!version) {
-      throw new Error('Please select a version to download');
+    if (!versionForBundle) {
+      throw new Error('Please select a version/image to download');
     }
 
     showStatus('Downloading and extracting bundle locally...', 'info');
-    appendLog(`Starting bundle download: ${selectedDevice.codename} ${version}`, 'info');
+    appendLog(`Starting bundle download: ${codenameForBundle} ${versionForBundle}`, 'info');
 
     // Show progress bar in flash section
     if (downloadProgress && progressFill && progressText) {
@@ -405,10 +454,10 @@ async function startFlashing(unlockBootloader = false) {
 
     appendLog(`Starting local flash execution...`, 'info');
     appendLog(`Device: ${selectedDevice.serial} (${selectedDevice.codename})`, 'info');
-    appendLog(`Bundle: ${selectedDevice.codename} ${version}`, 'info');
+    appendLog(`Bundle: ${codenameForBundle} ${versionForBundle}`, 'info');
     appendLog(`Skip unlock: ${selectedDevice.bootloader_unlocked ? 'Yes' : 'No'}`, 'info');
 
-    const bundlePath = await getLocalBundlePath(selectedDevice.codename, version);
+    const bundlePath = await getLocalBundlePath(codenameForBundle, versionForBundle);
     appendLog(`Bundle path: ${bundlePath}`, 'info');
 
     // Show job section
@@ -424,7 +473,7 @@ async function startFlashing(unlockBootloader = false) {
     let flashProgressUnsubscribe = null;
     if (window.electronAPI.onFlashProgress) {
       flashProgressUnsubscribe = window.electronAPI.onFlashProgress((progress) => {
-        if (progress.deviceSerial === selectedDevice.serial && progress.codename === selectedDevice.codename) {
+        if (progress.deviceSerial === selectedDevice.serial && progress.codename === codenameForBundle) {
           if (progress.message) {
             appendLog(progress.message, progress.status || 'info');
           }
@@ -739,18 +788,18 @@ async function downloadBundle() {
  * Download bundle from backend server and save locally
  * Returns true if download successful, false otherwise
  */
-async function downloadBundleFromServer(version) {
-  if (!selectedDevice || !selectedDevice.codename) {
-    throw new Error('No device selected');
-  }
-
+async function downloadBundleFromServer(codename, version) {
   if (!version) {
     throw new Error('No version specified');
   }
-
-  const bundle = bundleMetadata[version];
-  if (!bundle || !bundle.downloadUrl) {
-    throw new Error(`Download URL not available for version ${version}`);
+  const key = `${codename}${LIST_ALL_VALUE_SEP}${version}`;
+  const bundle = bundleMetadata[key] || bundleMetadata[version];
+  if (!bundle) {
+    throw new Error(`Bundle not found for ${codename} ${version}. Try "Load all device images" first.`);
+  }
+  const downloadUrl = bundle.downloadUrl || `https://releases.grapheneos.org/${codename}-factory-${version}.zip`;
+  if (!bundle.downloadUrl && !downloadUrl) {
+    throw new Error(`Download URL not available for ${codename} ${version}`);
   }
 
   if (!window.electronAPI) {
@@ -761,7 +810,7 @@ async function downloadBundleFromServer(version) {
 
   // First check if bundle exists locally and is extracted
   appendLog(`Checking if bundle is already present...`, 'info');
-  const localCheck = await window.electronAPI.checkLocalBundle(selectedDevice.codename, version);
+  const localCheck = await window.electronAPI.checkLocalBundle(codename, version);
 
   if (localCheck.exists) {
     if (localCheck.extracted) {
@@ -778,7 +827,7 @@ async function downloadBundleFromServer(version) {
       // Extract the existing ZIP (pass empty URL to skip download)
       try {
         const result = await window.electronAPI.downloadBundleLocal(
-          selectedDevice.codename,
+          codename,
           version,
           '' // Empty URL means just extract existing ZIP
         );
@@ -834,7 +883,7 @@ async function downloadBundleFromServer(version) {
 
       if (testResponse.ok) {
         useBackendDownload = true;
-        downloadUrl = backendDownloadUrl;
+        finalDownloadUrl = backendDownloadUrl;
         downloadSource = 'backend server';
         downloadStatus.innerHTML = `<div style="color: #93c5fd;">Downloading from backend server...</div>`;
         appendLog(`Using backend download: ${backendDownloadUrl}`, 'info');
@@ -1264,6 +1313,7 @@ async function installApk(filename) {
 // Event Listeners
 detectBtn.addEventListener('click', detectDevices);
 refreshBtn.addEventListener('click', detectDevices);
+if (loadAllImagesBtn) loadAllImagesBtn.addEventListener('click', loadAllImages);
 flashBtn.addEventListener('click', () => startFlashing(false));
 unlockFlashBtn.addEventListener('click', () => startFlashing(true));
 downloadBundleBtn.addEventListener('click', downloadBundle);
@@ -1306,6 +1356,34 @@ uploadApkBtn.addEventListener('click', async () => {
     uploadApkBtn.disabled = false;
   }
 });
+
+// ========== Theme (Light / Dark / Contrast) ==========
+const THEME_KEY = 'flashdash-theme';
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme || 'dark');
+  const select = document.getElementById('theme-select');
+  if (select) select.value = theme || 'dark';
+  try {
+    localStorage.setItem(THEME_KEY, theme || 'dark');
+  } catch (e) {}
+}
+
+function initTheme() {
+  let theme = 'dark';
+  try {
+    theme = localStorage.getItem(THEME_KEY) || 'dark';
+  } catch (e) {}
+  applyTheme(theme);
+  const themeSelect = document.getElementById('theme-select');
+  if (themeSelect) {
+    themeSelect.addEventListener('change', (e) => {
+      applyTheme(e.target.value);
+    });
+  }
+}
+
+initTheme();
 
 // Initialize
 console.log('FlashDash Client initialized');

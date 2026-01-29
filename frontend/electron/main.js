@@ -1068,11 +1068,91 @@ async function findAdbPath() {
 }
 
 /**
- * Execute flash locally using GrapheneFlasher
+ * Run flash script from bundle path: flash-all.bat (Windows) or flash-all.sh (Mac).
+ * Uses download path; passes device serial via FASTBOOT_SERIAL so the script flashes the correct device.
+ */
+function runFlashScript(bundlePath, deviceSerial, progressCallback) {
+  return new Promise((resolve, reject) => {
+    const isWindows = process.platform === 'win32';
+    const scriptName = isWindows ? 'flash-all.bat' : 'flash-all.sh';
+    const scriptPath = path.join(bundlePath, scriptName);
+
+    if (!fsSync.existsSync(scriptPath)) {
+      reject(new Error(`${scriptName} not found at ${scriptPath}`));
+      return;
+    }
+
+    if (progressCallback) {
+      progressCallback({ message: `Running ${scriptName} from bundle path...`, status: 'starting' });
+      progressCallback({ message: `Path: ${bundlePath}`, status: 'info' });
+      progressCallback({ message: `Device: ${deviceSerial}`, status: 'info' });
+    }
+
+    const env = { ...process.env, FASTBOOT_SERIAL: deviceSerial };
+    const opts = { cwd: bundlePath, env, shell: isWindows };
+
+    const child = spawn(isWindows ? 'cmd.exe' : 'sh', isWindows ? ['/c', scriptPath] : [scriptPath], opts);
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => {
+      const line = data.toString();
+      stdout += line;
+      if (progressCallback) {
+        line.split('\n').filter(Boolean).forEach(l => progressCallback({ message: l, status: 'info' }));
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      const line = data.toString();
+      stderr += line;
+      if (progressCallback) {
+        line.split('\n').filter(Boolean).forEach(l => progressCallback({ message: l, status: 'info' }));
+      }
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        if (progressCallback) progressCallback({ message: 'Flash completed successfully!', status: 'completed' });
+        resolve({ success: true });
+      } else {
+        const err = new Error(`Flash script exited with code ${code}. ${stderr || stdout}`.slice(0, 500));
+        if (progressCallback) progressCallback({ message: err.message, status: 'error' });
+        reject(err);
+      }
+    });
+
+    child.on('error', (err) => {
+      if (progressCallback) progressCallback({ message: `Script error: ${err.message}`, status: 'error' });
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Execute flash locally: try flash-all.bat / flash-all.sh first; fallback to GrapheneFlasher
  */
 async function executeLocalFlash(deviceSerial, bundlePath, skipUnlock, progressCallback) {
   try {
-    // Find fastboot and adb paths
+    // Prefer running the bundle script (flash-all.bat on Windows, flash-all.sh on Mac)
+    const scriptPathWin = path.join(bundlePath, 'flash-all.bat');
+    const scriptPathMac = path.join(bundlePath, 'flash-all.sh');
+    const hasScript = fsSync.existsSync(scriptPathWin) || fsSync.existsSync(scriptPathMac);
+
+    if (hasScript) {
+      try {
+        await runFlashScript(bundlePath, deviceSerial, progressCallback);
+        return { success: true };
+      } catch (scriptErr) {
+        if (progressCallback) {
+          progressCallback({ message: `Script flash failed, trying internal flasher: ${scriptErr.message}`, status: 'warning' });
+        }
+        // Fall through to GrapheneFlasher
+      }
+    }
+
+    // Fallback: GrapheneFlasher (direct fastboot commands)
     const fastbootPath = await findFastbootPath();
     const adbPath = await findAdbPath();
 
@@ -1084,14 +1164,12 @@ async function executeLocalFlash(deviceSerial, bundlePath, skipUnlock, progressC
       progressCallback({ message: `ADB: ${adbPath}`, status: 'info' });
     }
 
-    // Create flasher instance
     const flasher = new GrapheneFlasher(
       fastbootPath,
       adbPath,
       bundlePath,
       deviceSerial,
       (logData) => {
-        // Convert log data to progress callback format
         if (progressCallback) {
           progressCallback({
             message: logData.message,
@@ -1103,7 +1181,6 @@ async function executeLocalFlash(deviceSerial, bundlePath, skipUnlock, progressC
       }
     );
 
-    // Execute flash
     await flasher.flash();
 
     if (progressCallback) {
