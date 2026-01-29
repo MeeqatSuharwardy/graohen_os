@@ -351,7 +351,7 @@ async function loadAllImages() {
       opt2.value = value;
       opt2.textContent = label;
       bundleVersionSelect.appendChild(opt2);
-      bundleMetadata[value] = { codename, version, deviceName: b.deviceName };
+      bundleMetadata[value] = { codename, version, deviceName: b.deviceName, downloadUrl: b.downloadUrl };
     });
     if (bundles.length > 0) {
       downloadBundleBtn.disabled = false;
@@ -445,11 +445,11 @@ async function startFlashing(unlockBootloader = false) {
 
     let bundleExtracted = false;
     try {
-      await downloadBundleFromServer(version);
+      await downloadBundleFromServer(codenameForBundle, versionForBundle);
       bundleExtracted = true;
       showStatus('Bundle downloaded and extracted successfully', 'success');
       appendLog(`Bundle downloaded and extracted successfully`, 'info');
-      appendLog(`Bundle location: ${await getLocalBundlePath(selectedDevice.codename, version)}`, 'info');
+      appendLog(`Bundle location: ${await getLocalBundlePath(codenameForBundle, versionForBundle)}`, 'info');
       // Small delay after download
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
@@ -551,8 +551,8 @@ async function startFlashing(unlockBootloader = false) {
 
       const result = await window.electronAPI.executeLocalFlash(
         selectedDevice.serial,
-        selectedDevice.codename,
-        version,
+        codenameForBundle,
+        versionForBundle,
         skipUnlock
       );
 
@@ -907,32 +907,33 @@ async function downloadBundleFromServer(codename, version) {
   let progressUnsubscribe = null;
   if (window.electronAPI && window.electronAPI.onDownloadProgress) {
     progressUnsubscribe = window.electronAPI.onDownloadProgress((progress) => {
-      if (progress.codename === selectedDevice.codename && progress.version === version) {
+      if (progress.codename === codename && progress.version === version) {
         updateDownloadProgress(progress);
       }
     });
   }
 
   try {
-    // Prefer backend download endpoint if available
-    let downloadUrl = bundle.downloadUrl;
+    // Fallback URL if bundle has no downloadUrl (e.g. from list-all)
+    const fallbackUrl = `https://releases.grapheneos.org/${codename}-factory-${version}.zip`;
+    let downloadUrl = bundle.downloadUrl || fallbackUrl;
     let downloadSource = 'GrapheneOS releases';
 
-    // Try backend download endpoint first
-    const backendDownloadUrl = `${BACKEND_URL}/bundles/releases/${selectedDevice.codename}/${version}/download`;
+    // Try backend download endpoint first (use selected bundle codename/version)
+    const backendDownloadUrl = `${BACKEND_URL}/bundles/releases/${codename}/${version}/download`;
     let useBackendDownload = false;
 
     appendLog(`Checking bundle availability...`, 'info');
     try {
       const testResponse = await fetch(backendDownloadUrl, {
         method: 'HEAD',
-        // Add timeout to prevent hanging (5 seconds)
-        signal: AbortSignal.timeout(5000)
+        // Allow more time for backend to respond (zip may be built on-the-fly)
+        signal: AbortSignal.timeout(15000)
       });
 
       if (testResponse.ok) {
         useBackendDownload = true;
-        finalDownloadUrl = backendDownloadUrl;
+        downloadUrl = backendDownloadUrl;
         downloadSource = 'backend server';
         downloadStatus.innerHTML = `<div style="color: #93c5fd;">Downloading from backend server...</div>`;
         appendLog(`Using backend download: ${backendDownloadUrl}`, 'info');
@@ -950,20 +951,20 @@ async function downloadBundleFromServer(codename, version) {
       downloadStatus.innerHTML = `<div style="color: #93c5fd;">Downloading from GrapheneOS releases...</div>`;
     }
 
-    // If backend download failed, ensure we use direct URL
-    if (!useBackendDownload) {
-      downloadUrl = bundle.downloadUrl;
+    // Ensure we have a valid URL (backend or fallback)
+    if (!downloadUrl || downloadUrl.trim() === '') {
+      downloadUrl = fallbackUrl;
     }
 
     // Use Electron main process to download (bypasses CSP)
-    const filename = `${selectedDevice.codename}-factory-${version}.zip`;
+    const filename = `${codename}-factory-${version}.zip`;
     appendLog(`Starting download: ${filename}`, 'info');
     appendLog(`Source: ${downloadSource}`, 'info');
     appendLog(`URL: ${downloadUrl}`, 'info');
     console.log(`[Download] Starting download: ${downloadUrl}`);
 
     const result = await window.electronAPI.downloadBundleLocal(
-      selectedDevice.codename,
+      codename,
       version,
       downloadUrl
     );
@@ -1396,8 +1397,16 @@ async function installApk(filename) {
     }
   } catch (error) {
     console.error('Error installing APK:', error);
-    showApkStatus(`Failed to install ${filename}: ${error.message}`, 'error');
-    appendLog(`[APK] Failed to install ${filename}: ${error.message}`, 'error');
+    let statusMsg = `Failed to install ${filename}: ${error.message}`;
+    let logMsg = `[APK] Failed to install ${filename}: ${error.message}`;
+    // Explain common ABI mismatch (e.g. x86_64 APK on ARM phone)
+    if (error.message && (error.message.includes('INSTALL_FAILED_NO_MATCHING_ABIS') || error.message.includes('res=-113'))) {
+      const hint = ' This APK is built for a different CPU (e.g. x86_64). Use the ARM/arm64 build for your phone.';
+      statusMsg += hint;
+      logMsg += hint;
+    }
+    showApkStatus(statusMsg, 'error');
+    appendLog(logMsg, 'error');
   }
 }
 

@@ -762,6 +762,7 @@ async function downloadBundleToLocal(codename, version, downloadUrl, progressCal
           reject(error);
         });
       });
+      zipDownloaded = true; // Download completed; proceed to extraction
     }
 
     // Extract zip file (if ZIP exists, either downloaded or already present)
@@ -776,24 +777,36 @@ async function downloadBundleToLocal(codename, version, downloadUrl, progressCal
     }
 
     try {
-      if (AdmZip) {
-        // Use adm-zip library
-        console.log(`[Extract] Extracting ${zipPath} to ${extractedPath}`);
-        const zip = new AdmZip(zipPath);
-        zip.extractAllTo(extractedPath, true); // Overwrite existing files
-        console.log(`[Extract] Extraction completed`);
-      } else {
-        // Fallback to system unzip command
-        const isWindows = process.platform === 'win32';
+      const isWindows = process.platform === 'win32';
+      const isMac = process.platform === 'darwin';
+      let zipSize = 0;
+      try {
+        const st = await fs.stat(zipPath);
+        zipSize = st.size || 0;
+      } catch (_) {}
+
+      // Prefer system unzip on macOS (and when AdmZip unavailable) - more reliable for large bundles (1.5GB+)
+      const useSystemUnzip = !AdmZip || isMac || zipSize > 400 * 1024 * 1024; // >400MB or Mac or no AdmZip
+
+      if (useSystemUnzip) {
         console.log(`[Extract] Using system unzip command`);
         if (isWindows) {
-          // Windows: use PowerShell Expand-Archive or 7zip if available
           await execAsync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${extractedPath}' -Force"`);
         } else {
-          // Unix: use unzip command
-          await execAsync(`unzip -o "${zipPath}" -d "${extractedPath}"`);
+          // macOS/Linux: ensure extractedPath exists, then unzip (quote paths for spaces)
+          await fs.mkdir(extractedPath, { recursive: true });
+          const safeZip = zipPath.replace(/'/g, "'\\''");
+          const safeDest = extractedPath.replace(/'/g, "'\\''");
+          await execAsync(`unzip -o '${safeZip}' -d '${safeDest}'`);
         }
         console.log(`[Extract] System extraction completed`);
+      } else if (AdmZip) {
+        console.log(`[Extract] Extracting ${zipPath} to ${extractedPath}`);
+        const zip = new AdmZip(zipPath);
+        zip.extractAllTo(extractedPath, true);
+        console.log(`[Extract] Extraction completed`);
+      } else {
+        throw new Error('No unzip method available (install unzip or adm-zip)');
       }
 
       // After extraction, check where files actually ended up
