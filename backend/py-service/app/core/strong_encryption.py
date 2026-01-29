@@ -210,6 +210,8 @@ def decrypt_multi_layer(
         metadata_list = encrypted_data.get("metadata", [])
         layers = len(metadata_list)
         
+        # The ciphertext already includes all tags from all layers
+        # We need to extract and verify tags in reverse order
         current_data = ciphertext
         
         # Decrypt in reverse order (Layer 3 -> Layer 2 -> Layer 1)
@@ -217,7 +219,7 @@ def decrypt_multi_layer(
             layer_meta = metadata_list[i]
             algorithm = layer_meta["algorithm"]
             nonce = base64.b64decode(layer_meta["nonce"])
-            tag = base64.b64decode(layer_meta["tag"])
+            expected_tag = base64.b64decode(layer_meta["tag"])
             
             if algorithm == "AES-256-GCM-Scrypt":
                 # Layer 3: Derive key and decrypt
@@ -228,8 +230,24 @@ def decrypt_multi_layer(
                     combined_keys = primary_key + primary_key
                 key3 = derive_scrypt_key(combined_keys, salt)
                 
+                # Verify current_data has tag appended (should be at least TAG_SIZE bytes)
+                if len(current_data) < TAG_SIZE:
+                    raise StrongEncryptionError(f"Invalid ciphertext length for layer 3: {len(current_data)} bytes (expected at least {TAG_SIZE} bytes)")
+                
+                # GCM decrypt expects ciphertext + tag concatenated
+                # current_data already has the tag appended from encryption
                 aesgcm3 = AESGCM(key3)
-                current_data = aesgcm3.decrypt(nonce, current_data, None)
+                try:
+                    current_data = aesgcm3.decrypt(nonce, current_data, None)
+                except Exception as e:
+                    # Log detailed error information for debugging
+                    logger.error(
+                        f"Layer 3 (AES-256-GCM-Scrypt) decryption failed: "
+                        f"nonce_len={len(nonce)}, data_len={len(current_data)}, "
+                        f"expected_tag_len={len(expected_tag)}, salt_len={len(salt)}, "
+                        f"key3_len={len(key3) if 'key3' in locals() else 'N/A'}"
+                    )
+                    raise StrongEncryptionError(f"Layer 3 decryption failed: Invalid authentication tag. This may indicate wrong key or corrupted data.") from e
                 
             elif algorithm == "ChaCha20-Poly1305":
                 # Layer 2: Decrypt with secondary key

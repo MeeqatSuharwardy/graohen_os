@@ -266,19 +266,57 @@ class EmailServiceMongoDB:
             if email_doc.get("encryption_mode") != EncryptionMode.AUTHENTICATED.value:
                 raise EmailEncryptionError("Email requires passcode unlock")
             
-            # Derive keys from user email
-            user_salt = generate_salt_for_identifier(user_email)
-            primary_key = derive_key_from_passcode(user_email, user_salt)
-            secondary_key_data = user_email.encode() + user_salt
+            # For authenticated emails, the encryption key is derived from the SENDER's email
+            # Check if current user is the sender or a recipient
+            sender_email = email_doc.get("sender_email", "").lower()
+            recipient_emails = [email.lower() for email in email_doc.get("recipient_emails", [])]
+            user_email_lower = user_email.lower()
+            
+            # Determine which email to use for key derivation
+            # If user is the sender, use sender email; if recipient, also use sender email (for now)
+            # TODO: In future, implement recipient-specific encryption keys
+            encryption_email = sender_email if sender_email else user_email_lower
+            
+            if not encryption_email:
+                raise EmailEncryptionError("Email document missing sender_email")
+            
+            # Verify user has access (must be sender or recipient)
+            if user_email_lower != sender_email and user_email_lower not in recipient_emails:
+                raise EmailEncryptionError("Access denied: You are not authorized to decrypt this email")
+            
+            # Derive keys from sender's email (used during encryption)
+            # IMPORTANT: These must match exactly how they were derived during encryption
+            user_salt = generate_salt_for_identifier(encryption_email)
+            primary_key = derive_key_from_passcode(encryption_email, user_salt)
+            secondary_key_data = encryption_email.encode() + user_salt
             secondary_key = hashlib.sha256(secondary_key_data).digest()[:KEY_SIZE]
             
+            # Verify encrypted_content_key structure
+            encrypted_content_key = email_doc.get("encrypted_content_key")
+            if not encrypted_content_key:
+                raise EmailEncryptionError("Email document missing encrypted_content_key")
+            
+            if not isinstance(encrypted_content_key, dict):
+                raise EmailEncryptionError(f"Invalid encrypted_content_key format: expected dict, got {type(encrypted_content_key)}")
+            
+            if "ciphertext" not in encrypted_content_key:
+                raise EmailEncryptionError("encrypted_content_key missing 'ciphertext' field")
+            
             # Decrypt content key
-            encrypted_content_key = email_doc["encrypted_content_key"]
-            content_key = decrypt_multi_layer(
-                encrypted_content_key,
-                primary_key=primary_key,
-                secondary_key=secondary_key,
-            )
+            try:
+                content_key = decrypt_multi_layer(
+                    encrypted_content_key,
+                    primary_key=primary_key,
+                    secondary_key=secondary_key,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Content key decryption failed for email {access_token[:8]}...: "
+                    f"user_email={user_email}, "
+                    f"encryption_mode={email_doc.get('encryption_mode')}, "
+                    f"has_passcode={email_doc.get('has_passcode')}"
+                )
+                raise EmailEncryptionError(f"Failed to decrypt content key: {str(e)}") from e
             
             # Decrypt email content
             encrypted_content = email_doc["encrypted_content"]
