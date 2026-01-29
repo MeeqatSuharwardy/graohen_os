@@ -233,8 +233,13 @@ class EmailServiceMongoDB:
             db = get_mongodb()
             email_collection = db.emails
             
-            # Find email
-            email_doc = await email_collection.find_one({"access_token": access_token})
+            # Find email by access_token or email_id (they should be the same)
+            email_doc = await email_collection.find_one({
+                "$or": [
+                    {"access_token": access_token},
+                    {"email_id": access_token}
+                ]
+            })
             if not email_doc:
                 raise EmailEncryptionError("Email not found")
             
@@ -295,8 +300,13 @@ class EmailServiceMongoDB:
             db = get_mongodb()
             email_collection = db.emails
             
-            # Find email
-            email_doc = await email_collection.find_one({"access_token": access_token})
+            # Find email by access_token or email_id (they should be the same)
+            email_doc = await email_collection.find_one({
+                "$or": [
+                    {"access_token": access_token},
+                    {"email_id": access_token}
+                ]
+            })
             if not email_doc:
                 raise EmailEncryptionError("Email not found")
             
@@ -373,10 +383,10 @@ class EmailServiceMongoDB:
             db = get_mongodb()
             email_collection = db.emails
             
-            # Find emails where user is in recipient_emails
-            # Build query with proper MongoDB structure
+            # Find emails where user is in recipient_emails array
+            # recipient_emails is stored as an array, so use $in operator
             query = {
-                "recipient_emails": user_email.lower(),
+                "recipient_emails": {"$in": [user_email.lower()]},
                 "is_draft": False,
                 "$or": [
                     {"expires_at": {"$exists": False}},

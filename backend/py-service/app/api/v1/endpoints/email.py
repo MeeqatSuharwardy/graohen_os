@@ -406,7 +406,13 @@ async def get_email(
         from app.core.mongodb import get_mongodb
         db = get_mongodb()
         email_collection = db.emails
-        email_doc = await email_collection.find_one({"access_token": email_id})
+        # Try both access_token and email_id (they should be the same)
+        email_doc = await email_collection.find_one({
+            "$or": [
+                {"access_token": email_id},
+                {"email_id": email_id}
+            ]
+        })
         
         encryption_mode = email_doc.get("encryption_mode", "authenticated") if email_doc else "authenticated"
         is_passcode_protected = email_doc.get("has_passcode", False) if email_doc else False
@@ -658,7 +664,13 @@ async def delete_email(
             from app.core.mongodb import get_mongodb
             db = get_mongodb()
             email_collection = db.emails
-            email_doc = await email_collection.find_one({"access_token": email_id})
+            # Try both access_token and email_id (they should be the same)
+            email_doc = await email_collection.find_one({
+                "$or": [
+                    {"access_token": email_id},
+                    {"email_id": email_id}
+                ]
+            })
             
             if email_doc:
                 user_email = current_user.get("email")
@@ -804,7 +816,13 @@ async def get_email_by_token(
         email_collection = db.emails
         
         # Find email by email_id (token)
-        email_doc = await email_collection.find_one({"email_id": token})
+        # Try both email_id and access_token (they should be the same)
+        email_doc = await email_collection.find_one({
+            "$or": [
+                {"email_id": token},
+                {"access_token": token}
+            ]
+        })
         
         if not email_doc:
             raise HTTPException(
@@ -880,7 +898,7 @@ async def get_inbox_emails(
         db = get_mongodb()
         email_collection = db.emails
         total_query = {
-            "recipient_emails": user_email.lower(),
+            "recipient_emails": {"$in": [user_email.lower()]},
             "is_draft": False,
             "$or": [
                 {"expires_at": {"$exists": False}},
