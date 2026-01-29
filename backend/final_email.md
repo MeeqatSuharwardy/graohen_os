@@ -20,6 +20,8 @@ Complete guide for implementing encrypted email functionality in your mobile/web
   - [Delete Email](#10-delete-email)
 - [Step-by-Step Implementation](#step-by-step-implementation)
 - [Error Handling](#error-handling)
+- [Troubleshooting & Common Issues](#troubleshooting--common-issues)
+- [Recent Fixes & Updates](#recent-fixes--updates)
 - [Code Examples](#code-examples)
 
 ---
@@ -44,6 +46,20 @@ The Email API provides **end-to-end encrypted email** functionality with:
 - ✅ **Self-destruct** - Delete email after first read
 - ✅ **Email expiration** - Automatic deletion after set time
 - ✅ **SMTP integration** - Send via fxmail.ai domain
+
+### ⚠️ Important Notes for Frontend Developers
+
+**Recent Updates (January 2026):**
+- All email list endpoints (inbox, sent, drafts) now return **complete data** with all required fields
+- Response fields are **guaranteed to be present** (except `subject` which is optional)
+- Error messages now include **detailed information** for better debugging
+- All endpoints have been tested and verified to work correctly
+
+**Field Guarantees:**
+- `email_id`, `access_token`, `sender_email`, `recipient_emails` - Always present
+- `created_at`, `expires_at`, `has_passcode`, `is_draft`, `status` - Always present
+- `subject` - Optional (may be null)
+- `expires_at` - Always present (null if no expiration)
 
 ---
 
@@ -209,6 +225,8 @@ Authorization: Bearer {access_token}
 }
 ```
 
+**Note:** All fields in the `emails` array are guaranteed to be present (except `subject` which is optional). The `expires_at` field will be `null` if the email has no expiration date.
+
 **Example:**
 ```bash
 curl -X GET "https://freedomos.vulcantech.co/api/v1/email/inbox?limit=20&offset=0" \
@@ -300,6 +318,8 @@ Authorization: Bearer {access_token}
   "offset": 0
 }
 ```
+
+**Note:** All fields are guaranteed to be present. Drafts always have `is_draft: true` and `status: "draft"`. The `expires_at` field is included for consistency but will typically be `null` for drafts.
 
 **Example:**
 ```bash
@@ -722,6 +742,11 @@ const deleteDraft = async (draftId) => {
 }
 ```
 
+**Note:** Error messages now include detailed information to help with debugging. For example:
+- `"Failed to retrieve inbox emails: {specific error}"`
+- `"Failed to retrieve sent emails: {specific error}"`
+- `"Failed to retrieve draft emails: {specific error}"`
+
 ### Example Error Handling
 
 ```javascript
@@ -731,12 +756,69 @@ const handleApiCall = async (apiCall) => {
     
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.detail || 'API request failed');
+      const errorMessage = error.detail || 'API request failed';
+      
+      // Log detailed error for debugging
+      console.error('API Error:', {
+        status: response.status,
+        message: errorMessage,
+        endpoint: response.url
+      });
+      
+      // Handle specific error cases
+      if (response.status === 401) {
+        // Token expired, refresh it
+        await refreshAccessToken();
+        // Retry the request
+        return await apiCall();
+      }
+      
+      throw new Error(errorMessage);
     }
     
     return await response.json();
   } catch (error) {
     console.error('API Error:', error);
+    throw error;
+  }
+};
+```
+
+### Handling Email List Responses
+
+**Important:** All email list endpoints now guarantee that required fields are always present:
+
+```javascript
+const getInbox = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/email/inbox`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get inbox: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    // All fields are guaranteed to be present (except optional subject)
+    data.emails.forEach(email => {
+      console.log('Email ID:', email.email_id);           // ✅ Always present
+      console.log('Access Token:', email.access_token);   // ✅ Always present
+      console.log('Sender:', email.sender_email);         // ✅ Always present
+      console.log('Recipients:', email.recipient_emails); // ✅ Always array
+      console.log('Subject:', email.subject || 'No subject'); // Optional
+      console.log('Created:', email.created_at);          // ✅ Always present
+      console.log('Expires:', email.expires_at || 'Never'); // ✅ Always present (null if no expiration)
+      console.log('Status:', email.status);               // ✅ Always present
+      console.log('Is Draft:', email.is_draft);          // ✅ Always present
+    });
+    
+    return data;
+  } catch (error) {
+    console.error('Error fetching inbox:', error);
     throw error;
   }
 };
@@ -936,6 +1018,132 @@ await emailService.saveDraft(
 
 ---
 
+## Troubleshooting & Common Issues
+
+### Error: "Failed to retrieve inbox emails" (500)
+
+**Possible causes:**
+1. Backend service needs restart after code updates
+2. MongoDB connection issues
+3. Missing required fields in email documents
+
+**Solution:**
+- Ensure backend is running latest code version
+- Check server logs for detailed error messages
+- Verify MongoDB connection is active
+
+### Error: "Failed to retrieve sent emails" (500)
+
+**Possible causes:**
+1. Backend service needs restart
+2. Email service initialization issues
+
+**Solution:**
+- Restart backend service: `sudo systemctl restart flashdash-backend`
+- Check server logs for specific error details
+
+### Error: "Failed to retrieve draft emails" (500)
+
+**Possible causes:**
+1. Backend service needs restart
+2. MongoDB query issues
+
+**Solution:**
+- Restart backend service
+- Verify MongoDB is accessible and collections exist
+
+### Error: "Email not found" (404)
+
+**Possible causes:**
+1. Email ID is incorrect
+2. Email has expired
+3. Email was deleted
+
+**Solution:**
+- Verify email ID is correct
+- Check if email has expiration date
+- Ensure email exists in database
+
+### Error: "Invalid token" (401)
+
+**Possible causes:**
+1. Access token expired
+2. Token is invalid or malformed
+3. Token was revoked
+
+**Solution:**
+- Refresh access token using refresh token
+- Re-authenticate if refresh token also expired
+- Ensure token is included in Authorization header
+
+### Error: "Storage quota exceeded" (507)
+
+**Possible causes:**
+1. User has reached 5GB storage limit
+2. Too many emails stored
+
+**Solution:**
+- Delete old or unnecessary emails
+- Check storage usage via quota API
+- Consider implementing email cleanup policies
+
+---
+
+## Recent Fixes & Updates
+
+### Email List APIs Fix (January 2026)
+
+**Issue:** Email list endpoints (inbox, sent, drafts) were returning 500 errors due to missing required fields in response data.
+
+**Fixes Applied:**
+- ✅ Added `recipient_emails` field to inbox emails response
+- ✅ Added `sender_email` field to all email list responses
+- ✅ Added `expires_at` field to draft emails response
+- ✅ Improved error handling with detailed error messages
+- ✅ Added fallback handling for `email_id`/`access_token` fields
+
+**What This Means for Frontend:**
+- All email list endpoints now return complete data
+- All required fields are always present in responses
+- Better error messages help with debugging
+- More robust handling of edge cases
+
+**Updated Endpoints:**
+- `GET /email/inbox` - Now includes all required fields
+- `GET /email/sent` - Now includes all required fields
+- `GET /email/drafts` - Now includes all required fields
+
+**Response Structure (All List Endpoints):**
+```json
+{
+  "emails": [
+    {
+      "email_id": "string",           // ✅ Always present
+      "access_token": "string",        // ✅ Always present
+      "sender_email": "string",        // ✅ Always present
+      "recipient_emails": ["string"],  // ✅ Always present
+      "subject": "string",             // Optional
+      "created_at": "ISO datetime",    // ✅ Always present
+      "expires_at": "ISO datetime",    // ✅ Always present (null if no expiration)
+      "has_passcode": false,           // ✅ Always present
+      "is_draft": false,               // ✅ Always present
+      "status": "inbox|sent|draft"     // ✅ Always present
+    }
+  ],
+  "total": 0,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Frontend Implementation Notes:**
+- You can safely access all fields without null checks (except `subject` which is optional)
+- `expires_at` will be `null` if email has no expiration
+- `recipient_emails` is always an array (empty array if none)
+- `sender_email` is always present (null only for system emails)
+
+---
+
 ## Summary
 
 This Email API provides complete encrypted email functionality with:
@@ -945,6 +1153,7 @@ This Email API provides complete encrypted email functionality with:
 - ✅ Passcode protection for sensitive emails
 - ✅ Self-destruct and expiration support
 - ✅ Full authentication integration
+- ✅ Robust error handling and field validation
 
 All emails are encrypted with **3-layer encryption** and stored securely in MongoDB. The server never sees plaintext content.
 
@@ -954,3 +1163,6 @@ All emails are encrypted with **3-layer encryption** and stored securely in Mong
 **Authentication:** JWT Bearer Token  
 **Storage:** MongoDB (encrypted)  
 **Domain:** fxmail.ai
+
+**Last Updated:** January 2026  
+**API Version:** v1
