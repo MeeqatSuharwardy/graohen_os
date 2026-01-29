@@ -253,14 +253,6 @@ async def create_user(email: str, password: str, full_name: Optional[str] = None
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user account"
         )
-        "is_active": True,
-    }
-    
-    # Store user (temporary - replace with database)
-    _users_db[email.lower()] = user
-    
-    logger.info(f"User registered: {email}")
-    return user
 
 
 async def verify_device_binding(device_id: Optional[str], token_payload: Dict[str, Any]) -> bool:
