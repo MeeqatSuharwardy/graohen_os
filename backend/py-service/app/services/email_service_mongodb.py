@@ -7,7 +7,7 @@ import secrets
 import hashlib
 import base64
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union, Tuple
 from enum import Enum
 
 from app.core.encryption import (
@@ -227,8 +227,19 @@ class EmailServiceMongoDB:
         self,
         access_token: str,
         user_email: str,
-    ) -> bytes:
-        """Decrypt email for authenticated user"""
+        return_metadata: bool = False,
+    ) -> Union[bytes, Tuple[bytes, Dict[str, Any]]]:
+        """
+        Decrypt email for authenticated user
+        
+        Args:
+            access_token: Email access token
+            user_email: Authenticated user's email
+            return_metadata: If True, returns tuple (email_body, metadata_dict)
+        
+        Returns:
+            bytes: Decrypted email body, or tuple (bytes, dict) if return_metadata=True
+        """
         try:
             db = get_mongodb()
             email_collection = db.emails
@@ -281,6 +292,20 @@ class EmailServiceMongoDB:
             if email_doc.get("self_destruct"):
                 await email_collection.delete_one({"access_token": access_token})
                 logger.info(f"Email self-destructed: {access_token[:8]}...")
+            
+            if return_metadata:
+                # Return metadata along with decrypted body
+                metadata = {
+                    "encryption_mode": email_doc.get("encryption_mode", "authenticated"),
+                    "has_passcode": email_doc.get("has_passcode", False),
+                    "self_destruct": email_doc.get("self_destruct", False),
+                    "expires_at": email_doc.get("expires_at"),
+                    "sender_email": email_doc.get("sender_email"),
+                    "recipient_emails": email_doc.get("recipient_emails", []),
+                    "subject": email_doc.get("subject"),
+                    "created_at": email_doc.get("created_at"),
+                }
+                return email_body, metadata
             
             return email_body
             

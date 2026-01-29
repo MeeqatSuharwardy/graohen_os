@@ -555,38 +555,30 @@ async def get_email(
         client_ip = request.client.host if request.client else "unknown"
         user_email = current_user.get("email")
         
-        # Decrypt email for authenticated user
-        email_body_bytes = await service.decrypt_email_for_authenticated_user(
+        # Decrypt email for authenticated user and get metadata in one call
+        # This avoids a second MongoDB query
+        email_body_bytes, metadata = await service.decrypt_email_for_authenticated_user(
             access_token=email_id,
             user_email=user_email,
+            return_metadata=True,
         )
         
         # Parse email content (subject + body)
         email_content = email_body_bytes.decode("utf-8")
-        subject = None
+        subject = metadata.get("subject")  # Use subject from metadata if available
         body = email_content
         
-        if email_content.startswith("Subject: "):
+        # If subject is in email content, extract it
+        if not subject and email_content.startswith("Subject: "):
             lines = email_content.split("\n", 1)
             if len(lines) == 2:
                 subject = lines[0].replace("Subject: ", "")
                 body = lines[1].lstrip()
         
-        # Get metadata from MongoDB
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        # Try both access_token and email_id (they should be the same)
-        email_doc = await email_collection.find_one({
-            "$or": [
-                {"access_token": email_id},
-                {"email_id": email_id}
-            ]
-        })
-        
-        encryption_mode = email_doc.get("encryption_mode", "authenticated") if email_doc else "authenticated"
-        is_passcode_protected = email_doc.get("has_passcode", False) if email_doc else False
-        self_destruct = email_doc.get("self_destruct", False) if email_doc else False
+        # Get metadata from decryption result (no second MongoDB query needed)
+        encryption_mode = metadata.get("encryption_mode", "authenticated")
+        is_passcode_protected = metadata.get("has_passcode", False)
+        self_destruct = metadata.get("self_destruct", False)
         
         # Enforce view-once if self-destruct enabled
         if self_destruct:
@@ -641,12 +633,13 @@ async def get_email(
         
         logger.info(f"Email retrieved: id={email_id[:8]}..., user={user_email}")
         
-        # Get expiration from MongoDB
-        expires_at = None
-        if email_doc and email_doc.get("expires_at"):
-            expires_at = email_doc["expires_at"]
-            if isinstance(expires_at, datetime):
-                expires_at = expires_at.isoformat()
+        # Get expiration from metadata (already retrieved)
+        expires_at = metadata.get("expires_at")
+        if expires_at and isinstance(expires_at, datetime):
+            expires_at = expires_at.isoformat()
+        elif expires_at and isinstance(expires_at, str):
+            # Already a string, use as is
+            pass
         
         return EmailGetResponse(
             email_id=email_id,

@@ -43,6 +43,15 @@ async def setup_mongodb():
         await emails_collection.create_index("access_token", unique=True)
         logger.info("   ✅ Index created: access_token (unique)")
         
+        # Compound index for $or queries (access_token OR email_id lookups)
+        # This optimizes the common query pattern in decrypt_email_for_authenticated_user
+        try:
+            await emails_collection.create_index([("access_token", 1), ("email_id", 1)])
+            logger.info("   ✅ Index created: compound (access_token, email_id)")
+        except Exception as e:
+            # Index might already exist, that's okay
+            logger.debug(f"   ℹ️  Compound index (access_token, email_id) already exists or failed: {e}")
+        
         # Index on sender_email for sent emails query
         await emails_collection.create_index("sender_email")
         logger.info("   ✅ Index created: sender_email")
