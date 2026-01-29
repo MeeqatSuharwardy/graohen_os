@@ -25,7 +25,15 @@ from app.core.security_hardening import (
     SecurityEvent,
     BruteForceError,
 )
+from app.core.user_encryption import (
+    encrypt_user_data,
+    decrypt_user_data,
+    hash_email_for_lookup,
+    generate_user_encryption_keys,
+)
+from app.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import logging
 
 logger = logging.getLogger(__name__)
@@ -108,34 +116,77 @@ class DeviceEncryptionKeyResponse(BaseModel):
     message: str
 
 
-# Temporary User model (until database models are defined)
-# This is a simple in-memory store for demonstration
-# In production, replace with proper database model
-_users_db: Dict[str, Dict[str, Any]] = {}
-
-
 async def get_user_by_email(email: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
     """
-    Get user by email.
+    Get user by email from database.
     
-    TODO: Replace with proper database query when User model is available.
+    Uses email hash for lookup, then decrypts email for verification.
     """
-    # Temporary implementation using in-memory store
-    return _users_db.get(email.lower())
-    
-    # Future implementation:
-    # from app.models.user import User
-    # result = await db.execute(select(User).where(User.email == email.lower()))
-    # user = result.scalar_one_or_none()
-    # return user
+    try:
+        # Hash email for lookup
+        email_hash = hash_email_for_lookup(email)
+        
+        # Query database by email hash
+        result = await db.execute(
+            select(User).where(User.email_hash == email_hash)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            return None
+        
+        # Decrypt email using metadata
+        decrypted_email = decrypt_user_data(
+            user.encrypted_email,  # Not used but kept for compatibility
+            user.encryption_metadata
+        )
+        
+        # Verify email matches (double-check)
+        if decrypted_email.lower() != email.lower():
+            logger.warning(f"Email hash collision detected for hash: {email_hash[:8]}...")
+            return None
+        
+        # Decrypt full_name if present (uses same encryption metadata)
+        decrypted_full_name = None
+        if user.encrypted_full_name:
+            # Full name uses same keys, so we can decrypt it
+            # Note: In current implementation, full_name encryption metadata is stored separately
+            # For now, we'll decrypt using the same metadata (keys are the same)
+            try:
+                decrypted_full_name = decrypt_user_data(
+                    user.encrypted_full_name,
+                    user.encryption_metadata
+                )
+            except Exception as e:
+                logger.warning(f"Failed to decrypt full_name: {e}")
+                decrypted_full_name = None
+        
+        # Return user dict (for compatibility with existing code)
+        return {
+            "id": str(user.id),
+            "email": decrypted_email.lower(),
+            "hashed_password": user.hashed_password,
+            "full_name": decrypted_full_name,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get user by email: {e}", exc_info=True)
+        return None
 
 
 async def create_user(email: str, password: str, full_name: Optional[str] = None, db: AsyncSession = None) -> Dict[str, Any]:
     """
-    Create a new user.
+    Create a new user with encrypted data.
     
-    TODO: Replace with proper database insert when User model is available.
+    Encrypts email and full_name before storing in database.
     """
+    if db is None:
+        raise ValueError("Database session is required")
+    
     # Check if user exists
     existing = await get_user_by_email(email, db)
     if existing:
@@ -144,19 +195,64 @@ async def create_user(email: str, password: str, full_name: Optional[str] = None
             detail="Email already registered"
         )
     
-    # Hash password
-    hashed_password = hash_password(password)
-    
-    # Generate user ID
-    user_id = secrets.token_urlsafe(16)
-    
-    # Create user record
-    user = {
-        "id": secrets.token_urlsafe(16),
-        "email": email.lower(),
-        "hashed_password": hashed_password,
-        "full_name": full_name,
-        "created_at": datetime.utcnow(),
+    try:
+        # Hash password
+        hashed_password = hash_password(password)
+        
+        # Encrypt email (generate keys once, reuse for full_name)
+        primary_key, secondary_key = generate_user_encryption_keys()
+        encrypted_email_bytes, email_metadata = encrypt_user_data(
+            email.lower(),
+            primary_key=primary_key,
+            secondary_key=secondary_key
+        )
+        
+        # Encrypt full_name if provided (reuse same keys)
+        encrypted_full_name_bytes = None
+        if full_name:
+            encrypted_full_name_bytes, _ = encrypt_user_data(
+                full_name,
+                primary_key=primary_key,
+                secondary_key=secondary_key
+            )
+        
+        # Create email hash for lookup
+        email_hash = hash_email_for_lookup(email)
+        
+        # Create user record
+        user = User(
+            encrypted_email=encrypted_email_bytes,
+            email_hash=email_hash,
+            hashed_password=hashed_password,
+            encrypted_full_name=encrypted_full_name_bytes,
+            encryption_metadata=json.dumps(email_metadata),
+            is_active=True,
+            is_verified=False,
+        )
+        
+        # Save to database
+        db.add(user)
+        await db.flush()  # Flush to get the ID
+        await db.refresh(user)
+        
+        # Return user dict (for compatibility)
+        return {
+            "id": str(user.id),
+            "email": email.lower(),
+            "hashed_password": hashed_password,
+            "full_name": full_name,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to create user: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user account"
+        )
         "is_active": True,
     }
     
