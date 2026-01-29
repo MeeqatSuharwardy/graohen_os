@@ -19,21 +19,12 @@ from app.core.security import (
     decode_token,
 )
 from app.core.redis_client import get_redis
-from app.core.database import get_db
 from app.core.security_hardening import (
     get_security_service,
     SecurityEvent,
     BruteForceError,
 )
-from app.core.user_encryption import (
-    encrypt_user_data,
-    decrypt_user_data,
-    hash_email_for_lookup,
-    generate_user_encryption_keys,
-)
-from app.models.user import User
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from app.services.user_service_mongodb import get_user_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -116,137 +107,35 @@ class DeviceEncryptionKeyResponse(BaseModel):
     message: str
 
 
-async def get_user_by_email(email: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
+async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """
-    Get user by email from database.
+    Get user by email from MongoDB.
     
     Uses email hash for lookup, then decrypts email for verification.
     """
     try:
-        # Hash email for lookup
-        email_hash = hash_email_for_lookup(email)
-        
-        # Query database by email hash
-        result = await db.execute(
-            select(User).where(User.email_hash == email_hash)
-        )
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            return None
-        
-        # Decrypt email using metadata
-        decrypted_email = decrypt_user_data(
-            user.encrypted_email,  # Not used but kept for compatibility
-            user.encryption_metadata
-        )
-        
-        # Verify email matches (double-check)
-        if decrypted_email.lower() != email.lower():
-            logger.warning(f"Email hash collision detected for hash: {email_hash[:8]}...")
-            return None
-        
-        # Decrypt full_name if present (uses same encryption metadata)
-        decrypted_full_name = None
-        if user.encrypted_full_name:
-            # Full name uses same keys, so we can decrypt it
-            # Note: In current implementation, full_name encryption metadata is stored separately
-            # For now, we'll decrypt using the same metadata (keys are the same)
-            try:
-                decrypted_full_name = decrypt_user_data(
-                    user.encrypted_full_name,
-                    user.encryption_metadata
-                )
-            except Exception as e:
-                logger.warning(f"Failed to decrypt full_name: {e}")
-                decrypted_full_name = None
-        
-        # Return user dict (for compatibility with existing code)
-        return {
-            "id": str(user.id),
-            "email": decrypted_email.lower(),
-            "hashed_password": user.hashed_password,
-            "full_name": decrypted_full_name,
-            "is_active": user.is_active,
-            "is_verified": user.is_verified,
-            "created_at": user.created_at,
-            "updated_at": user.updated_at,
-        }
-        
+        user_service = get_user_service()
+        return await user_service.get_user_by_email(email)
     except Exception as e:
         logger.error(f"Failed to get user by email: {e}", exc_info=True)
         return None
 
 
-async def create_user(email: str, password: str, full_name: Optional[str] = None, db: AsyncSession = None) -> Dict[str, Any]:
+async def create_user(email: str, password: str, full_name: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a new user with encrypted data.
     
-    Encrypts email and full_name before storing in database.
+    Encrypts email and full_name before storing in MongoDB.
     """
-    if db is None:
-        raise ValueError("Database session is required")
-    
-    # Check if user exists
-    existing = await get_user_by_email(email, db)
-    if existing:
+    try:
+        user_service = get_user_service()
+        return await user_service.create_user(email, password, full_name)
+    except ValueError as e:
+        # Email already exists
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail=str(e)
         )
-    
-    try:
-        # Hash password
-        hashed_password = hash_password(password)
-        
-        # Encrypt email (generate keys once, reuse for full_name)
-        primary_key, secondary_key = generate_user_encryption_keys()
-        encrypted_email_bytes, email_metadata = encrypt_user_data(
-            email.lower(),
-            primary_key=primary_key,
-            secondary_key=secondary_key
-        )
-        
-        # Encrypt full_name if provided (reuse same keys)
-        encrypted_full_name_bytes = None
-        if full_name:
-            encrypted_full_name_bytes, _ = encrypt_user_data(
-                full_name,
-                primary_key=primary_key,
-                secondary_key=secondary_key
-            )
-        
-        # Create email hash for lookup
-        email_hash = hash_email_for_lookup(email)
-        
-        # Create user record
-        user = User(
-            encrypted_email=encrypted_email_bytes,
-            email_hash=email_hash,
-            hashed_password=hashed_password,
-            encrypted_full_name=encrypted_full_name_bytes,
-            encryption_metadata=json.dumps(email_metadata),
-            is_active=True,
-            is_verified=False,
-        )
-        
-        # Save to database
-        db.add(user)
-        await db.flush()  # Flush to get the ID
-        await db.refresh(user)
-        
-        # Return user dict (for compatibility)
-        return {
-            "id": str(user.id),
-            "email": email.lower(),
-            "hashed_password": hashed_password,
-            "full_name": full_name,
-            "is_active": user.is_active,
-            "is_verified": user.is_verified,
-            "created_at": user.created_at,
-            "updated_at": user.updated_at,
-        }
-        
     except Exception as e:
         logger.error(f"Failed to create user: {e}", exc_info=True)
         raise HTTPException(
@@ -421,7 +310,6 @@ def generate_token_jti() -> str:
 async def register(
     user_data: UserRegister,
     request: Request,
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Register a new user.
@@ -445,7 +333,6 @@ async def register(
             email=user_data.email,
             password=user_data.password,
             full_name=user_data.full_name,
-            db=db,
         )
         
         # Generate device ID if not provided
@@ -520,7 +407,6 @@ async def register(
 async def login(
     credentials: UserLogin,
     request: Request,
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Login with email and password.
@@ -556,7 +442,7 @@ async def login(
         #     )
         
         # Get user
-        user = await get_user_by_email(credentials.email, db)
+        user = await get_user_by_email(credentials.email)
         if not user:
             # Failed attempt recording removed
             # remaining = await security.record_failed_attempt(
@@ -857,7 +743,6 @@ async def logout(
 # Dependency for protected routes
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     Dependency to get current authenticated user from JWT token.
@@ -908,7 +793,7 @@ async def get_current_user(
             )
         
         # Get user from database
-        user = await get_user_by_email(email, db)
+        user = await get_user_by_email(email)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
