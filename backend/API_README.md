@@ -8,6 +8,16 @@ Complete API reference for building mobile applications with end-to-end encrypti
 - [Base URL](#base-url)
 - [Authentication](#authentication)
 - [Email API](#email-api)
+  - [Send Encrypted Email](#send-encrypted-email)
+  - [Get Email](#get-email-authenticated-users)
+  - [Get Inbox Emails](#get-inbox-emails)
+  - [Get Sent Emails](#get-sent-emails)
+  - [Get Draft Emails](#get-draft-emails)
+  - [Save Draft Email](#save-draft-email)
+  - [Update Draft Email](#update-draft-email)
+  - [Delete Draft Email](#delete-draft-email)
+  - [Unlock Passcode-Protected Email](#unlock-passcode-protected-email)
+  - [Delete Email](#delete-email)
 - [Drive API](#drive-api)
 - [Messaging API](#messaging-api)
 - [Error Handling](#error-handling)
@@ -39,13 +49,15 @@ All encrypted emails and files are stored in **MongoDB** (not Redis):
 - **Server never sees plaintext** - only encrypted ciphertext is stored
 - **Automatic expiration** - Expired emails/files are automatically cleaned up
 
-### Email Server (SMTP)
+### Email Server (SMTP & Postfix)
 
-The backend includes an **email sending server** that:
-- Sends notification emails via **fxmail.ai** domain
-- Uses SMTP to deliver encrypted email notifications
-- Recipients receive a secure link to access encrypted emails
-- Email domain: `fxmail.ai` (all emails sent from `token@fxmail.ai` format)
+The backend includes a **complete email system** that:
+- **SMTP Sending**: Sends notification emails via **fxmail.ai** domain
+- **Postfix Integration**: Receives incoming emails via Postfix SMTP server
+- **Email Ingestion**: Automatically processes incoming emails and stores them encrypted
+- **Notification Delivery**: Recipients receive secure links to access encrypted emails
+- **Email Domain**: `fxmail.ai` (all emails sent from `token@fxmail.ai` format)
+- **Security**: Rate limiting (50 emails/hour, 200/day), abuse protection, token validation
 
 Think of it like this:
 - **Without E2E**: You write a letter, put it in an envelope, and give it to a mail carrier. The carrier can open and read your letter.
@@ -305,10 +317,17 @@ Now that you understand how encryption works, let's dive into the API endpoints!
 
 ## Base URL
 
+**Production (Deployed):**
 ```
-Production: https://your-domain.com/api/v1
-Development: http://localhost:8000/api/v1
+https://freedomos.vulcantech.co/api/v1
 ```
+
+**Development (Local):**
+```
+https://freedomos.vulcantech.co/api/v1
+```
+
+**Note:** For production mobile apps, use the production URL. The backend is deployed and ready for use.
 
 All endpoints require authentication unless specified otherwise.
 
@@ -345,8 +364,11 @@ Create a new user account.
 
 **Example (JavaScript/React Native):**
 ```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+// const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Development
+
 const registerUser = async (email, password, fullName) => {
-  const response = await fetch('http://localhost:8000/api/v1/auth/register', {
+  const response = await fetch(`${API_BASE_URL}/auth/register`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -400,7 +422,7 @@ Authenticate and get access tokens.
 **Example:**
 ```javascript
 const login = async (email, password) => {
-  const response = await fetch('http://localhost:8000/api/v1/auth/login', {
+  const response = await fetch('https://freedomos.vulcantech.co/api/v1/auth/login', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -522,20 +544,39 @@ Content-Type: application/json
 **What Happens:**
 1. Your email content is encrypted with **3 layers of encryption**
 2. Encrypted data is stored in **MongoDB** database
-3. **SMTP server** sends notification email to recipients via `fxmail.ai`
+3. **Postfix SMTP server** sends notification email to recipients via `fxmail.ai`
 4. Recipients receive email with secure link to access encrypted content
 5. Server **never sees plaintext** - only encrypted ciphertext
+6. **Rate limiting** enforced (50 emails/hour, 200/day per user)
+7. **Abuse protection** detects spam patterns automatically
 
 **Email Delivery:**
-- Notification emails are sent automatically to all recipients
+- Notification emails are sent automatically to all recipients via Postfix
 - Email sent from: `{token}@fxmail.ai`
 - Recipients can click secure link to decrypt and view email
 - Email content remains encrypted until recipient decrypts it
+- **Postfix Integration**: Incoming emails to `token@fxmail.ai` are automatically ingested and encrypted
+
+**Security Features:**
+- Rate limiting: 50 emails per hour, 200 per day per user
+- Recipient validation: Maximum 50 recipients per email
+- Email size limit: 25 MB maximum
+- Abuse pattern detection: Automatic spam detection
+- Token validation: Minimum 32 characters for email tokens
+
+**Security Features:**
+- **Rate Limiting**: 50 emails per hour, 200 emails per day per user
+- **Recipient Validation**: Maximum 50 recipients per email
+- **Email Size Limit**: 25 MB maximum per email
+- **Abuse Protection**: Automatic detection of spam patterns
+- **Token Validation**: Minimum 32 characters for email tokens
 
 **Example:**
 ```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
 const sendEmail = async (recipients, subject, body, accessToken) => {
-  const response = await fetch('http://localhost:8000/api/v1/email/send', {
+  const response = await fetch(`${API_BASE_URL}/email/send`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -583,9 +624,11 @@ Authorization: Bearer {access_token}
 
 **Example:**
 ```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
 const getEmail = async (emailId, accessToken) => {
   const response = await fetch(
-    `http://localhost:8000/api/v1/email/${emailId}`,
+    `${API_BASE_URL}/email/${emailId}`,
     {
       method: 'GET',
       headers: {
@@ -632,9 +675,11 @@ Unlock an email protected with a passcode.
 
 **Example:**
 ```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
 const unlockEmail = async (emailId, passcode) => {
   const response = await fetch(
-    `http://localhost:8000/api/v1/email/${emailId}/unlock`,
+    `${API_BASE_URL}/email/${emailId}/unlock`,
     {
       method: 'POST',
       headers: {
@@ -650,6 +695,410 @@ const unlockEmail = async (emailId, passcode) => {
       throw new Error('Too many unlock attempts. Please try again later.');
     }
     throw new Error(error.detail || 'Failed to unlock email');
+  }
+  
+  return await response.json();
+};
+```
+
+### Get Email by Token (Public Access)
+
+Access an email using its token (for web viewer or public access).
+
+**Endpoint:** `GET /email/token/{token}`
+
+**Note:** This endpoint does not require authentication. It returns email metadata but keeps content encrypted (client must decrypt).
+
+**Response:**
+```json
+{
+  "email_id": "z5LVkIi8tELLPfYABwaJLmaSpeOwBpFjmsAoyco60rQ",
+  "subject": null,
+  "body": "",
+  "encryption_mode": "authenticated",
+  "expires_at": "2026-01-30T20:45:51.168035",
+  "is_passcode_protected": false
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const getEmailByToken = async (token) => {
+  const response = await fetch(
+    `${API_BASE_URL}/email/token/${token}`,
+    {
+      method: 'GET',
+    }
+  );
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to retrieve email');
+  }
+  
+  return await response.json();
+};
+```
+
+### Email Ingestion (Postfix Integration)
+
+**Internal Endpoint:** `POST /email/ingest`
+
+This endpoint is used by Postfix SMTP server to pipe incoming emails to FastAPI. It:
+- Receives raw email bytes from Postfix
+- Extracts token from recipient address (`token@fxmail.ai`)
+- Encrypts email with 3-layer encryption
+- Stores encrypted email in MongoDB
+
+**Note:** This endpoint is for internal use (Postfix → FastAPI). Mobile apps should use `/email/send` for sending emails.
+
+### Get Inbox Emails
+
+Get list of received emails (inbox).
+
+**Endpoint:** `GET /email/inbox`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Query Parameters:**
+- `limit` (optional): Number of emails to return (default: 50, max: 100)
+- `offset` (optional): Offset for pagination (default: 0)
+
+**Response:**
+```json
+{
+  "emails": [
+    {
+      "email_id": "z5LVkIi8tELLPfYABwaJLmaSpeOwBpFjmsAoyco60rQ",
+      "access_token": "z5LVkIi8tELLPfYABwaJLmaSpeOwBpFjmsAoyco60rQ",
+      "sender_email": "sender@example.com",
+      "subject": "Email Subject",
+      "created_at": "2026-01-29T20:45:51.168035",
+      "expires_at": "2026-01-30T20:45:51.168035",
+      "has_passcode": false,
+      "is_draft": false,
+      "status": "inbox"
+    }
+  ],
+  "total": 25,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const getInboxEmails = async (accessToken, limit = 50, offset = 0) => {
+  const response = await fetch(
+    `${API_BASE_URL}/email/inbox?limit=${limit}&offset=${offset}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    }
+  );
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to retrieve inbox emails');
+  }
+  
+  return await response.json();
+};
+```
+
+### Get Sent Emails
+
+Get list of emails sent by the current user.
+
+**Endpoint:** `GET /email/sent`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Query Parameters:**
+- `limit` (optional): Number of emails to return (default: 50, max: 100)
+- `offset` (optional): Offset for pagination (default: 0)
+
+**Response:**
+```json
+{
+  "emails": [
+    {
+      "email_id": "z5LVkIi8tELLPfYABwaJLmaSpeOwBpFjmsAoyco60rQ",
+      "access_token": "z5LVkIi8tELLPfYABwaJLmaSpeOwBpFjmsAoyco60rQ",
+      "recipient_emails": ["recipient@example.com"],
+      "subject": "Email Subject",
+      "created_at": "2026-01-29T20:45:51.168035",
+      "expires_at": "2026-01-30T20:45:51.168035",
+      "has_passcode": false,
+      "is_draft": false,
+      "status": "sent"
+    }
+  ],
+  "total": 15,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const getSentEmails = async (accessToken, limit = 50, offset = 0) => {
+  const response = await fetch(
+    `${API_BASE_URL}/email/sent?limit=${limit}&offset=${offset}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    }
+  );
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to retrieve sent emails');
+  }
+  
+  return await response.json();
+};
+```
+
+### Get Draft Emails
+
+Get list of draft emails created by the current user.
+
+**Endpoint:** `GET /email/drafts`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Query Parameters:**
+- `limit` (optional): Number of emails to return (default: 50, max: 100)
+- `offset` (optional): Offset for pagination (default: 0)
+
+**Response:**
+```json
+{
+  "emails": [
+    {
+      "email_id": "draft123abc456",
+      "access_token": "draft123abc456",
+      "recipient_emails": ["recipient@example.com"],
+      "subject": "Draft Email Subject",
+      "created_at": "2026-01-29T20:45:51.168035",
+      "has_passcode": false,
+      "is_draft": true,
+      "status": "draft"
+    }
+  ],
+  "total": 5,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const getDraftEmails = async (accessToken, limit = 50, offset = 0) => {
+  const response = await fetch(
+    `${API_BASE_URL}/email/drafts?limit=${limit}&offset=${offset}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    }
+  );
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to retrieve draft emails');
+  }
+  
+  return await response.json();
+};
+```
+
+### Save Draft Email
+
+Save or update a draft email. Drafts are encrypted and stored but not sent until explicitly sent.
+
+**Endpoint:** `POST /email/drafts`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+**Request:**
+```json
+{
+  "to": ["recipient@example.com"],
+  "subject": "Draft Email Subject",
+  "body": "Draft email body content",
+  "draft_id": "optional-draft-id-for-updating"
+}
+```
+
+**Request Fields:**
+- `to` (required): Array of recipient email addresses
+- `subject` (optional): Email subject (max 500 chars)
+- `body` (required): Email body content
+- `draft_id` (optional): Draft ID for updating existing draft
+
+**Response:**
+```json
+{
+  "email_id": "draft123abc456",
+  "access_token": "draft123abc456",
+  "email_address": "draft123abc456@fxmail.ai",
+  "status": "draft",
+  "created_at": "2026-01-29T20:45:51.168035",
+  "updated_at": "2026-01-29T21:00:00.000000"
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const saveDraft = async (recipients, subject, body, accessToken, draftId = null) => {
+  const response = await fetch(`${API_BASE_URL}/email/drafts`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to: recipients,
+      subject: subject || null,
+      body: body,
+      draft_id: draftId, // Include to update existing draft
+    }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to save draft');
+  }
+  
+  return await response.json();
+};
+```
+
+### Update Draft Email
+
+Update an existing draft email.
+
+**Endpoint:** `PUT /email/drafts/{draft_id}`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+**Request:**
+```json
+{
+  "to": ["recipient@example.com"],
+  "subject": "Updated Draft Subject",
+  "body": "Updated draft body content"
+}
+```
+
+**Response:**
+```json
+{
+  "email_id": "draft123abc456",
+  "access_token": "draft123abc456",
+  "email_address": "draft123abc456@fxmail.ai",
+  "status": "draft",
+  "created_at": "2026-01-29T20:45:51.168035",
+  "updated_at": "2026-01-29T21:15:00.000000"
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const updateDraft = async (draftId, recipients, subject, body, accessToken) => {
+  const response = await fetch(`${API_BASE_URL}/email/drafts/${draftId}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to: recipients,
+      subject: subject || null,
+      body: body,
+    }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update draft');
+  }
+  
+  return await response.json();
+};
+```
+
+### Delete Draft Email
+
+Delete a draft email. Only the owner of the draft can delete it.
+
+**Endpoint:** `DELETE /email/drafts/{draft_id}`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Response:**
+```json
+{
+  "email_id": "draft123abc456",
+  "deleted": true,
+  "message": "Draft deleted successfully"
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const deleteDraft = async (draftId, accessToken) => {
+  const response = await fetch(`${API_BASE_URL}/email/drafts/${draftId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to delete draft');
   }
   
   return await response.json();
@@ -728,7 +1177,7 @@ Authorization: Bearer {access_token}
 ```javascript
 const getStorageQuota = async (accessToken) => {
   const response = await fetch(
-    'http://localhost:8000/api/v1/drive/storage/quota',
+    'https://freedomos.vulcantech.co/api/v1/drive/storage/quota',
     {
       method: 'GET',
       headers: {
@@ -801,7 +1250,7 @@ const uploadFile = async (fileUri, filename, accessToken, passcode = null) => {
   formData.append('expires_in_hours', '168'); // 7 days
   
   const response = await fetch(
-    'http://localhost:8000/api/v1/drive/upload',
+    'https://freedomos.vulcantech.co/api/v1/drive/upload',
     {
       method: 'POST',
       headers: {
@@ -892,7 +1341,7 @@ const uploadEncryptedFile = async (
   const encryptedContentKey = await encryptAES256GCM(contentKey, deviceKey);
   
   const response = await fetch(
-    'http://localhost:8000/api/v1/drive/upload-encrypted',
+    'https://freedomos.vulcantech.co/api/v1/drive/upload-encrypted',
     {
       method: 'POST',
       headers: {
@@ -960,7 +1409,7 @@ Authorization: Bearer {access_token}
 ```javascript
 const getFileInfo = async (fileId, accessToken) => {
   const response = await fetch(
-    `http://localhost:8000/api/v1/drive/file/${fileId}`,
+    `${API_BASE_URL}/drive/file/${fileId}`,
     {
       method: 'GET',
       headers: {
@@ -977,6 +1426,8 @@ const getFileInfo = async (fileId, accessToken) => {
   return await response.json();
 };
 ```
+
+**Note:** The `API_BASE_URL` should be set to `https://freedomos.vulcantech.co/api/v1` for production.
 
 ### Download File
 
@@ -999,8 +1450,8 @@ Authorization: Bearer {access_token}  (or use token query parameter)
 ```javascript
 const downloadFile = async (fileId, signedUrl, accessToken) => {
   const url = signedUrl 
-    ? `http://localhost:8000${signedUrl}`
-    : `http://localhost:8000/api/v1/drive/file/${fileId}/download`;
+    ? `https://freedomos.vulcantech.co${signedUrl}`
+    : `https://freedomos.vulcantech.co/api/v1/drive/file/${fileId}/download`;
   
   const headers = signedUrl 
     ? {} 
@@ -1077,7 +1528,7 @@ Authorization: Bearer {access_token}
 ```javascript
 const deleteFile = async (fileId, accessToken) => {
   const response = await fetch(
-    `http://localhost:8000/api/v1/drive/file/${fileId}`,
+    `${API_BASE_URL}/drive/file/${fileId}`,
     {
       method: 'DELETE',
       headers: {
@@ -1093,6 +1544,9 @@ const deleteFile = async (fileId, accessToken) => {
   
   return await response.json();
 };
+```
+
+**Note:** Set `API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'` for production.
 ```
 
 ---
@@ -1165,7 +1619,7 @@ const sendMessage = async (
   );
   
   const response = await fetch(
-    'http://localhost:8000/api/v1/messaging/send',
+    'https://freedomos.vulcantech.co/api/v1/messaging/send',
     {
       method: 'POST',
       headers: {
@@ -1242,7 +1696,7 @@ Authorization: Bearer {access_token}
 ```javascript
 const getMessages = async (accessToken, limit = 50, offset = 0) => {
   const response = await fetch(
-    `http://localhost:8000/api/v1/messaging/messages?limit=${limit}&offset=${offset}`,
+    `https://freedomos.vulcantech.co/api/v1/messaging/messages?limit=${limit}&offset=${offset}`,
     {
       method: 'GET',
       headers: {
@@ -1763,7 +2217,7 @@ const decryptAES256GCM = async (encrypted, key) => {
 └─────────────────────────────────────────────────────────────┘
                         ↓ HTTPS
 ┌─────────────────────────────────────────────────────────────┐
-│              FastAPI Backend (localhost:8000)               │
+│         FastAPI Backend (freedomos.vulcantech.co)           │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  API Endpoints                                      │   │
@@ -1866,7 +2320,16 @@ const decryptAES256GCM = async (encrypted, key) => {
 
 ### Backend Configuration
 
-The backend runs on `localhost:8000` and requires:
+**Production Backend:**
+- **URL**: `https://freedomos.vulcantech.co`
+- **API Base**: `https://freedomos.vulcantech.co/api/v1`
+- **Health Check**: `https://freedomos.vulcantech.co/health`
+
+**Development Backend:**
+- **URL**: `http://localhost:8000`
+- **API Base**: `http://localhost:8000/api/v1`
+
+The backend requires:
 
 **MongoDB:**
 - Connection string configured in environment variables
@@ -1891,14 +2354,18 @@ SMTP_USE_TLS=true
 
 # Email Domain
 EMAIL_DOMAIN=fxmail.ai
-EXTERNAL_HTTPS_BASE_URL=https://fxmail.ai
+EXTERNAL_HTTPS_BASE_URL=https://freedomos.vulcantech.co
 ```
 
 ### Mobile App Configuration
 
 **Base URL:**
 ```javascript
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+// Production (Deployed)
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1';
+
+// Development (Local Testing)
+// const API_BASE_URL = 'http://localhost:8000/api/v1';
 ```
 
 **No CORS Required:**
@@ -1918,9 +2385,15 @@ const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 2. **Email Features**
    - Send emails with `/email/send` (server encrypts automatically)
+   - Get inbox emails with `/email/inbox` (received emails)
+   - Get sent emails with `/email/sent` (emails you sent)
+   - Get draft emails with `/email/drafts` (saved drafts)
+   - Save/update drafts with `/email/drafts` (POST/PUT)
+   - Delete drafts with `/email/drafts/{draft_id}` (DELETE)
    - Recipients receive notification emails via `fxmail.ai`
    - Emails stored in MongoDB with 3-layer encryption
    - Server never sees plaintext email content
+   - Pagination support for inbox/sent/drafts (limit/offset)
 
 3. **Drive Features**
    - Upload files with `/drive/upload` (server encrypts)
@@ -1943,10 +2416,13 @@ const API_BASE_URL = 'http://localhost:8000/api/v1';
 - Multi-layer encryption (3 layers)
 
 **Email Server:**
-- Domain: `fxmail.ai`
-- Sends notification emails automatically
-- Recipients get secure links to decrypt emails
-- SMTP configured for `smtp.fxmail.ai`
+- **Domain**: `fxmail.ai`
+- **SMTP**: Postfix configured and running
+- **Email Ingestion**: Postfix pipes incoming emails to FastAPI
+- **Notification Delivery**: Sends notification emails automatically
+- **Recipients**: Get secure links to decrypt emails
+- **Security**: Rate limiting (50/hour, 200/day), abuse protection
+- **SMTP Host**: `smtp.fxmail.ai` (port 587)
 
 **Database:**
 - MongoDB stores all encrypted data
@@ -2006,13 +2482,22 @@ const API_BASE_URL = 'http://localhost:8000/api/v1';
 ✅ **Server cannot decrypt** - No access to encryption keys  
 ✅ **Multi-layer encryption** - 3 layers make attacks extremely difficult  
 ✅ **MongoDB storage** - Persistent, encrypted storage  
-✅ **Email delivery** - Secure notifications via fxmail.ai  
+✅ **Email delivery** - Secure notifications via fxmail.ai (Postfix SMTP)  
+✅ **Email ingestion** - Postfix pipes incoming emails to FastAPI automatically  
+✅ **Rate limiting** - Email sending limited (50/hour, 200/day per user)  
+✅ **Abuse protection** - Automatic spam pattern detection  
+✅ **Inbox/Sent/Drafts** - Full email management with inbox, sent, and drafts folders  
+✅ **Draft management** - Save, update, and delete draft emails  
+✅ **Pagination** - All list endpoints support limit/offset pagination  
 ✅ **Storage limits** - 5GB quota enforced per user  
 ✅ **No plaintext storage** - Everything encrypted before database  
+✅ **Redis integration** - Required for rate limiting and security features  
 
 ### Important Notes
 
-1. **Backend runs on localhost:8000** - No CORS needed for mobile apps
+1. **Production Backend**: `https://freedomos.vulcantech.co` - Deployed and live
+2. **Development Backend**: `http://localhost:8000` - For local testing
+3. **No CORS needed** - Backend configured for mobile apps
 2. **All emails via fxmail.ai** - Notification emails sent automatically
 3. **MongoDB stores encrypted data** - Server never sees plaintext
 4. **3-layer encryption** - Maximum security for all data
@@ -2028,4 +2513,8 @@ For API support or questions, contact the development team or refer to the main 
 - MongoDB stores encrypted data only
 - Server never sees plaintext content
 - Maximum security for sensitive communications
-- Backend: `localhost:8000` (no CORS for mobile apps)
+- **Production Backend**: `https://freedomos.vulcantech.co` (deployed and live)
+- **Development Backend**: `https://freedomos.vulcantech.co` (local testing)
+- No CORS needed for mobile apps
+- Postfix SMTP server configured for email delivery
+- Redis required for rate limiting and security features

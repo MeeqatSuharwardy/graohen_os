@@ -268,6 +268,7 @@ class EmailIngestionService:
                 subject=email_subject,
                 self_destruct=False,
                 email_id=token,  # Use token as email_id
+                status="inbox",  # Mark as inbox for incoming emails
             )
             
             logger.info(f"Ingested email with token {token[:16]}... from {sender_email}")

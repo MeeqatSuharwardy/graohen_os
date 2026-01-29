@@ -102,6 +102,46 @@ class EmailDeleteResponse(BaseModel):
     message: str
 
 
+class EmailListItem(BaseModel):
+    """Email list item (metadata only, no encrypted content)"""
+    email_id: str
+    access_token: str
+    sender_email: Optional[str] = None
+    recipient_emails: Optional[List[str]] = None
+    subject: Optional[str] = None
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    has_passcode: bool = False
+    is_draft: bool = False
+    status: str  # sent, inbox, draft
+
+
+class EmailListResponse(BaseModel):
+    """Email list response"""
+    emails: List[EmailListItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class DraftSaveRequest(BaseModel):
+    """Draft save request"""
+    to: List[EmailStr] = Field(..., min_items=1, description="Recipient email addresses")
+    subject: Optional[str] = Field(None, max_length=500, description="Email subject")
+    body: str = Field(..., min_length=1, description="Email body content")
+    draft_id: Optional[str] = Field(None, description="Draft ID for updating existing draft")
+
+
+class DraftSaveResponse(BaseModel):
+    """Draft save response"""
+    email_id: str
+    access_token: str
+    email_address: str
+    status: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class EmailIngestRequest(BaseModel):
     """Email ingestion request from Postfix"""
     email_bytes: Optional[bytes] = None
@@ -397,6 +437,8 @@ async def get_email(
         # Delete email if self-destruct is enabled
         if self_destruct:
             await service.delete_email(email_id)
+            redis = await get_redis()
+            self_destruct_key = f"view_once:email:{email_id}:{user_email}"
             await redis.delete(self_destruct_key)
             
             await security.log_security_event(
@@ -806,5 +848,331 @@ async def get_email_by_token(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve email"
+        )
+
+
+# Inbox/Sent/Drafts Endpoints
+
+@router.get("/inbox", response_model=EmailListResponse)
+async def get_inbox_emails(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get inbox emails (received emails).
+    
+    Returns list of emails where the current user is a recipient.
+    Only returns metadata (no encrypted content).
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        
+        emails = await service.get_inbox_emails(
+            user_email=user_email,
+            limit=limit,
+            offset=offset,
+        )
+        
+        # Get total count
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        total = await email_collection.count_documents({
+            "recipient_emails": user_email.lower(),
+            "is_draft": False,
+            "$or": [
+                {"expires_at": {"$exists": False}},
+                {"expires_at": {"$gt": datetime.utcnow()}},
+            ],
+        })
+        
+        return EmailListResponse(
+            emails=[EmailListItem(**email) for email in emails],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get inbox emails: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve inbox emails"
+        )
+
+
+@router.get("/sent", response_model=EmailListResponse)
+async def get_sent_emails(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get sent emails.
+    
+    Returns list of emails sent by the current user.
+    Only returns metadata (no encrypted content).
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        
+        emails = await service.get_sent_emails(
+            user_email=user_email,
+            limit=limit,
+            offset=offset,
+        )
+        
+        # Get total count
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        total = await email_collection.count_documents({
+            "sender_email": user_email.lower(),
+            "is_draft": False,
+            "$or": [
+                {"expires_at": {"$exists": False}},
+                {"expires_at": {"$gt": datetime.utcnow()}},
+            ],
+        })
+        
+        return EmailListResponse(
+            emails=[EmailListItem(**email) for email in emails],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get sent emails: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve sent emails"
+        )
+
+
+@router.get("/drafts", response_model=EmailListResponse)
+async def get_draft_emails(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get draft emails.
+    
+    Returns list of draft emails created by the current user.
+    Only returns metadata (no encrypted content).
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        
+        emails = await service.get_draft_emails(
+            user_email=user_email,
+            limit=limit,
+            offset=offset,
+        )
+        
+        # Get total count
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        total = await email_collection.count_documents({
+            "sender_email": user_email.lower(),
+            "is_draft": True,
+        })
+        
+        return EmailListResponse(
+            emails=[EmailListItem(**email) for email in emails],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get draft emails: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve draft emails"
+        )
+
+
+@router.post("/drafts", response_model=DraftSaveResponse, status_code=status.HTTP_201_CREATED)
+async def save_draft_email(
+    draft_data: DraftSaveRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Save or update draft email.
+    
+    Creates a new draft or updates an existing draft if draft_id is provided.
+    Drafts are encrypted and stored but not sent until explicitly sent.
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        
+        # Prepare email body (include subject in body for encryption)
+        email_body_content = draft_data.body
+        if draft_data.subject:
+            email_body_content = f"Subject: {draft_data.subject}\n\n{draft_data.body}"
+        
+        email_body_bytes = email_body_content.encode("utf-8")
+        
+        # Save draft
+        result = await service.save_draft_email(
+            email_body=email_body_bytes,
+            sender_email=user_email,
+            recipient_emails=draft_data.to,
+            subject=draft_data.subject,
+            draft_id=draft_data.draft_id,
+        )
+        
+        logger.info(f"Draft saved: id={result['email_id'][:8]}...")
+        
+        return DraftSaveResponse(
+            email_id=result["email_id"],
+            access_token=result["access_token"],
+            email_address=result["email_address"],
+            status=result["status"],
+            created_at=result.get("created_at"),
+            updated_at=result.get("updated_at"),
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to save draft: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save draft email"
+        )
+
+
+@router.put("/drafts/{draft_id}", response_model=DraftSaveResponse)
+async def update_draft_email(
+    draft_id: str,
+    draft_data: DraftSaveRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Update existing draft email.
+    
+    Updates the draft with new content. The draft_id must match an existing draft owned by the user.
+    """
+    try:
+        user_email = current_user.get("email")
+        
+        # Verify draft ownership
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        draft = await email_collection.find_one({"email_id": draft_id, "is_draft": True})
+        
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found"
+            )
+        
+        if draft.get("sender_email", "").lower() != user_email.lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only update your own drafts"
+            )
+        
+        service = get_email_service_mongodb()
+        
+        # Prepare email body
+        email_body_content = draft_data.body
+        if draft_data.subject:
+            email_body_content = f"Subject: {draft_data.subject}\n\n{draft_data.body}"
+        
+        email_body_bytes = email_body_content.encode("utf-8")
+        
+        # Update draft
+        result = await service.save_draft_email(
+            email_body=email_body_bytes,
+            sender_email=user_email,
+            recipient_emails=draft_data.to,
+            subject=draft_data.subject,
+            draft_id=draft_id,
+        )
+        
+        logger.info(f"Draft updated: id={draft_id[:8]}...")
+        
+        return DraftSaveResponse(
+            email_id=result["email_id"],
+            access_token=result["access_token"],
+            email_address=result["email_address"],
+            status=result["status"],
+            created_at=result.get("created_at"),
+            updated_at=result.get("updated_at"),
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update draft: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update draft email"
+        )
+
+
+@router.delete("/drafts/{draft_id}", response_model=EmailDeleteResponse)
+async def delete_draft_email(
+    draft_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Delete draft email.
+    
+    Only the owner of the draft can delete it.
+    """
+    try:
+        user_email = current_user.get("email")
+        
+        # Verify draft ownership
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        draft = await email_collection.find_one({"email_id": draft_id, "is_draft": True})
+        
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found"
+            )
+        
+        if draft.get("sender_email", "").lower() != user_email.lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only delete your own drafts"
+            )
+        
+        service = get_email_service_mongodb()
+        deleted = await service.delete_email(draft_id)
+        
+        if deleted:
+            logger.info(f"Draft deleted: id={draft_id[:8]}...")
+            return EmailDeleteResponse(
+                email_id=draft_id,
+                deleted=True,
+                message="Draft deleted successfully"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete draft: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete draft email"
         )
 

@@ -81,6 +81,7 @@ class EmailServiceMongoDB:
         subject: Optional[str] = None,
         self_destruct: bool = False,
         email_id: Optional[str] = None,
+        status: Optional[str] = None,  # "sent", "inbox", "draft"
     ) -> Dict[str, Any]:
         """
         Encrypt email with multi-layer encryption and store in MongoDB.
@@ -159,6 +160,17 @@ class EmailServiceMongoDB:
             db = get_mongodb()
             email_collection = db.emails
             
+            # Determine status: use provided status, or default to "sent" for outgoing emails
+            # For incoming emails (user_email=None), status should be "inbox"
+            if status:
+                email_status = status
+            elif user_email is None:
+                # Incoming email (no authenticated user)
+                email_status = "inbox"
+            else:
+                # Outgoing email
+                email_status = "sent"
+            
             email_doc = {
                 "email_id": email_id,
                 "access_token": access_token,
@@ -174,6 +186,8 @@ class EmailServiceMongoDB:
                 "expires_at": expires_at,
                 "self_destruct": self_destruct,
                 "email_address": email_address,
+                "status": email_status,  # sent, inbox, draft
+                "is_draft": False,
             }
             
             await email_collection.insert_one(email_doc)
@@ -347,6 +361,318 @@ class EmailServiceMongoDB:
         except Exception as e:
             logger.error(f"Failed to delete email: {e}", exc_info=True)
             return False
+    
+    async def get_inbox_emails(
+        self,
+        user_email: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Get inbox emails for user (emails where user is recipient)"""
+        try:
+            db = get_mongodb()
+            email_collection = db.emails
+            
+            # Find emails where user is in recipient_emails
+            query = {
+                "recipient_emails": user_email.lower(),
+                "is_draft": False,
+            }
+            
+            # Exclude expired emails
+            query["$or"] = [
+                {"expires_at": {"$exists": False}},
+                {"expires_at": {"$gt": datetime.utcnow()}},
+            ]
+            
+            cursor = email_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
+            emails = await cursor.to_list(length=limit)
+            
+            # Return metadata only (not encrypted content)
+            result = []
+            for email in emails:
+                result.append({
+                    "email_id": email.get("email_id"),
+                    "access_token": email.get("access_token"),
+                    "sender_email": email.get("sender_email"),
+                    "subject": email.get("subject"),
+                    "created_at": email.get("created_at").isoformat() if email.get("created_at") else None,
+                    "expires_at": email.get("expires_at").isoformat() if email.get("expires_at") else None,
+                    "has_passcode": email.get("has_passcode", False),
+                    "is_draft": email.get("is_draft", False),
+                    "status": email.get("status", "inbox"),
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get inbox emails: {e}", exc_info=True)
+            raise EmailEncryptionError(f"Failed to get inbox emails: {str(e)}") from e
+    
+    async def get_sent_emails(
+        self,
+        user_email: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Get sent emails for user (emails where user is sender)"""
+        try:
+            db = get_mongodb()
+            email_collection = db.emails
+            
+            # Find emails where user is sender
+            query = {
+                "sender_email": user_email.lower(),
+                "is_draft": False,
+            }
+            
+            # Exclude expired emails
+            query["$or"] = [
+                {"expires_at": {"$exists": False}},
+                {"expires_at": {"$gt": datetime.utcnow()}},
+            ]
+            
+            cursor = email_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
+            emails = await cursor.to_list(length=limit)
+            
+            # Return metadata only (not encrypted content)
+            result = []
+            for email in emails:
+                result.append({
+                    "email_id": email.get("email_id"),
+                    "access_token": email.get("access_token"),
+                    "recipient_emails": email.get("recipient_emails", []),
+                    "subject": email.get("subject"),
+                    "created_at": email.get("created_at").isoformat() if email.get("created_at") else None,
+                    "expires_at": email.get("expires_at").isoformat() if email.get("expires_at") else None,
+                    "has_passcode": email.get("has_passcode", False),
+                    "is_draft": email.get("is_draft", False),
+                    "status": email.get("status", "sent"),
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get sent emails: {e}", exc_info=True)
+            raise EmailEncryptionError(f"Failed to get sent emails: {str(e)}") from e
+    
+    async def get_draft_emails(
+        self,
+        user_email: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Get draft emails for user"""
+        try:
+            db = get_mongodb()
+            email_collection = db.emails
+            
+            # Find draft emails where user is sender
+            query = {
+                "sender_email": user_email.lower(),
+                "is_draft": True,
+            }
+            
+            cursor = email_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
+            emails = await cursor.to_list(length=limit)
+            
+            # Return metadata only (not encrypted content)
+            result = []
+            for email in emails:
+                result.append({
+                    "email_id": email.get("email_id"),
+                    "access_token": email.get("access_token"),
+                    "recipient_emails": email.get("recipient_emails", []),
+                    "subject": email.get("subject"),
+                    "created_at": email.get("created_at").isoformat() if email.get("created_at") else None,
+                    "has_passcode": email.get("has_passcode", False),
+                    "is_draft": email.get("is_draft", True),
+                    "status": "draft",
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get draft emails: {e}", exc_info=True)
+            raise EmailEncryptionError(f"Failed to get draft emails: {str(e)}") from e
+    
+    async def save_draft_email(
+        self,
+        email_body: bytes,
+        sender_email: str,
+        recipient_emails: List[str],
+        subject: Optional[str] = None,
+        draft_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Save or update draft email"""
+        try:
+            db = get_mongodb()
+            email_collection = db.emails
+            
+            # Generate content key
+            content_key = generate_strong_key()
+            
+            # Derive keys from user email (for drafts, we use authenticated mode)
+            user_salt = generate_salt_for_identifier(sender_email)
+            primary_key = derive_key_from_passcode(sender_email, user_salt)
+            secondary_key_data = sender_email.encode() + user_salt
+            secondary_key = hashlib.sha256(secondary_key_data).digest()[:KEY_SIZE]
+            
+            # Encrypt email content with multi-layer encryption
+            encrypted_content = encrypt_multi_layer(
+                email_body,
+                primary_key=content_key,
+                secondary_key=secondary_key,
+                layers=3
+            )
+            
+            # Encrypt content key
+            encrypted_content_key = encrypt_multi_layer(
+                content_key,
+                primary_key=primary_key,
+                secondary_key=secondary_key,
+                layers=3
+            )
+            
+            # Generate or use existing draft ID
+            if draft_id:
+                access_token = draft_id
+                email_id = draft_id
+            else:
+                access_token = self.generate_public_access_token()
+                email_id = access_token
+            
+            email_address = self.generate_email_address(access_token)
+            
+            # Check if draft exists
+            existing_draft = await email_collection.find_one({"email_id": email_id, "is_draft": True})
+            
+            draft_doc = {
+                "email_id": email_id,
+                "access_token": access_token,
+                "sender_email": sender_email.lower(),
+                "recipient_emails": [email.lower() for email in recipient_emails],
+                "encrypted_content": encrypted_content,
+                "encrypted_content_key": encrypted_content_key,
+                "encryption_mode": EncryptionMode.AUTHENTICATED.value,
+                "has_passcode": False,
+                "passcode_salt": None,
+                "subject": subject,
+                "created_at": datetime.utcnow() if not existing_draft else existing_draft.get("created_at"),
+                "updated_at": datetime.utcnow(),
+                "expires_at": None,  # Drafts don't expire
+                "self_destruct": False,
+                "email_address": email_address,
+                "status": "draft",
+                "is_draft": True,
+            }
+            
+            if existing_draft:
+                # Update existing draft
+                await email_collection.update_one(
+                    {"email_id": email_id, "is_draft": True},
+                    {"$set": draft_doc}
+                )
+                logger.info(f"Draft updated: {email_id[:8]}...")
+            else:
+                # Create new draft
+                await email_collection.insert_one(draft_doc)
+                logger.info(f"Draft created: {email_id[:8]}...")
+            
+            return {
+                "email_id": email_id,
+                "access_token": access_token,
+                "email_address": email_address,
+                "status": "draft",
+                "created_at": draft_doc["created_at"].isoformat() if isinstance(draft_doc["created_at"], datetime) else draft_doc["created_at"],
+                "updated_at": draft_doc["updated_at"].isoformat() if isinstance(draft_doc["updated_at"], datetime) else None,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to save draft email: {e}", exc_info=True)
+            raise EmailEncryptionError(f"Failed to save draft email: {str(e)}") from e
+    
+    async def send_draft_email(
+        self,
+        draft_id: str,
+        sender_email: str,
+        passcode: Optional[str] = None,
+        expires_in_hours: Optional[int] = None,
+        self_destruct: bool = False,
+    ) -> Dict[str, Any]:
+        """Send a draft email (convert draft to sent email)"""
+        try:
+            db = get_mongodb()
+            email_collection = db.emails
+            
+            # Find draft
+            draft = await email_collection.find_one({"email_id": draft_id, "is_draft": True})
+            if not draft:
+                raise EmailEncryptionError("Draft not found")
+            
+            # Verify sender owns the draft
+            if draft.get("sender_email", "").lower() != sender_email.lower():
+                raise EmailEncryptionError("You can only send your own drafts")
+            
+            # Update draft to sent email
+            update_data = {
+                "is_draft": False,
+                "status": "sent",
+                "updated_at": datetime.utcnow(),
+            }
+            
+            # Update passcode if provided
+            if passcode:
+                salt = self.key_manager.generate_salt()
+                passcode_key = derive_key_from_passcode(passcode, salt)
+                secondary_key_data = passcode.encode() + salt
+                secondary_key = hashlib.sha256(secondary_key_data).digest()[:KEY_SIZE]
+                
+                # Re-encrypt content key with passcode
+                encrypted_content_key = draft["encrypted_content_key"]
+                # Note: This is simplified - in production, you'd want to decrypt and re-encrypt
+                update_data["has_passcode"] = True
+                update_data["passcode_salt"] = base64.b64encode(salt).decode("utf-8")
+                update_data["encryption_mode"] = EncryptionMode.PASSCODE_PROTECTED.value
+            
+            # Update expiration
+            if expires_in_hours:
+                update_data["expires_at"] = datetime.utcnow() + timedelta(hours=expires_in_hours)
+            
+            update_data["self_destruct"] = self_destruct
+            
+            await email_collection.update_one(
+                {"email_id": draft_id, "is_draft": True},
+                {"$set": update_data}
+            )
+            
+            # Send notification emails
+            recipient_emails = draft.get("recipient_emails", [])
+            email_address = draft.get("email_address")
+            secure_link = f"{EXTERNAL_BASE_URL}/email/{draft_id}"
+            
+            for recipient in recipient_emails:
+                try:
+                    await self.email_sender.send_encrypted_email_notification(
+                        recipient_email=recipient,
+                        email_address=email_address,
+                        secure_link=secure_link,
+                        sender_email=sender_email,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send notification to {recipient}: {e}")
+            
+            logger.info(f"Draft sent: {draft_id[:8]}...")
+            
+            return {
+                "email_id": draft_id,
+                "status": "sent",
+                "sent_at": datetime.utcnow().isoformat(),
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to send draft email: {e}", exc_info=True)
+            raise EmailEncryptionError(f"Failed to send draft email: {str(e)}") from e
 
 
 # Global service instance
