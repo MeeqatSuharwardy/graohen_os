@@ -11,7 +11,18 @@ This guide explains how to migrate MongoDB data (emails and files) on your serve
 
 ## 🔍 Current MongoDB Setup
 
-**Connection String:** (from `.env`)
+**MongoDB Credentials:**
+- **Username**: `doadmin`
+- **Password**: `R6j8Oe2r1h749U5C`
+- **Host**: `mongodb+srv://db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com`
+- **Database**: `admin`
+
+**Connection String:**
+```
+mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin
+```
+
+**In `.env` file:**
 ```
 MONGODB_CONNECTION_STRING=mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin
 MONGODB_DATABASE=admin
@@ -38,15 +49,19 @@ mkdir -p /root/mongodb_backups
 cd /root/mongodb_backups
 
 # Backup emails collection
+# Set connection string
+MONGODB_URI="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin"
+
+# Backup emails collection
 mongodump \
-  --uri="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin" \
+  --uri="$MONGODB_URI" \
   --db=admin \
   --collection=emails \
   --out=./backup_$(date +%Y%m%d_%H%M%S)
 
 # Backup files collection
 mongodump \
-  --uri="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin" \
+  --uri="$MONGODB_URI" \
   --db=admin \
   --collection=files \
   --out=./backup_$(date +%Y%m%d_%H%M%S)
@@ -67,15 +82,19 @@ mkdir -p ~/mongodb_backups
 cd ~/mongodb_backups
 
 # Backup emails collection
+# Set connection string
+MONGODB_URI="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin"
+
+# Backup emails collection
 mongodump \
-  --uri="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin" \
+  --uri="$MONGODB_URI" \
   --db=admin \
   --collection=emails \
   --out=./backup_$(date +%Y%m%d_%H%M%S)
 
 # Backup files collection
 mongodump \
-  --uri="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin" \
+  --uri="$MONGODB_URI" \
   --db=admin \
   --collection=files \
   --out=./backup_$(date +%Y%m%d_%H%M%S)
@@ -90,14 +109,19 @@ tar -czf mongodb_backup_$(date +%Y%m%d_%H%M%S).tar.gz backup_*/
 
 ```bash
 # Export data to JSON
+# Set connection string
+MONGODB_URI="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin"
+
+# Export emails
 mongoexport \
-  --uri="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin" \
+  --uri="$MONGODB_URI" \
   --db=admin \
   --collection=emails \
   --out=emails_export.json
 
+# Export files
 mongoexport \
-  --uri="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin" \
+  --uri="$MONGODB_URI" \
   --db=admin \
   --collection=files \
   --out=files_export.json
@@ -238,8 +262,10 @@ DATE=$(date +%Y%m%d_%H%M%S)
 
 mkdir -p $BACKUP_DIR
 
+MONGODB_URI="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin"
+
 mongodump \
-  --uri="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin" \
+  --uri="$MONGODB_URI" \
   --db=admin \
   --out=$BACKUP_DIR/backup_$DATE
 
