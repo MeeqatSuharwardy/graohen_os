@@ -28,8 +28,12 @@ class UserServiceMongoDB:
     """User service using MongoDB with strong multi-layer encryption"""
     
     def __init__(self):
-        self.db = get_mongodb()
-        self.users_collection = self.db["users"]
+        try:
+            self.db = get_mongodb()
+            self.users_collection = self.db["users"]
+        except RuntimeError as e:
+            logger.error(f"MongoDB not initialized: {e}")
+            raise RuntimeError("MongoDB not initialized. Call init_mongodb() first.") from e
     
     async def create_user(
         self,

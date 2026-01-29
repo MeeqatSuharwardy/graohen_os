@@ -402,10 +402,19 @@ class EmailServiceMongoDB:
                 elif expires_at:
                     expires_at = str(expires_at)
                 
+                # Get email_id or access_token (they should be the same)
+                email_id = email.get("email_id") or email.get("access_token")
+                access_token = email.get("access_token") or email.get("email_id")
+                
+                if not email_id or not access_token:
+                    logger.warning(f"Email document missing email_id/access_token: {email.get('_id')}")
+                    continue
+                
                 result.append({
-                    "email_id": email.get("email_id"),
-                    "access_token": email.get("access_token"),
+                    "email_id": email_id,
+                    "access_token": access_token,
                     "sender_email": email.get("sender_email"),
+                    "recipient_emails": email.get("recipient_emails", []),
                     "subject": email.get("subject"),
                     "created_at": created_at,
                     "expires_at": expires_at,
@@ -459,9 +468,18 @@ class EmailServiceMongoDB:
                 elif expires_at:
                     expires_at = str(expires_at)
                 
+                # Get email_id or access_token (they should be the same)
+                email_id = email.get("email_id") or email.get("access_token")
+                access_token = email.get("access_token") or email.get("email_id")
+                
+                if not email_id or not access_token:
+                    logger.warning(f"Email document missing email_id/access_token: {email.get('_id')}")
+                    continue
+                
                 result.append({
-                    "email_id": email.get("email_id"),
-                    "access_token": email.get("access_token"),
+                    "email_id": email_id,
+                    "access_token": access_token,
+                    "sender_email": email.get("sender_email"),
                     "recipient_emails": email.get("recipient_emails", []),
                     "subject": email.get("subject"),
                     "created_at": created_at,
@@ -506,14 +524,30 @@ class EmailServiceMongoDB:
                 elif created_at:
                     created_at = str(created_at)
                 
+                expires_at = email.get("expires_at")
+                if expires_at and isinstance(expires_at, datetime):
+                    expires_at = expires_at.isoformat()
+                elif expires_at:
+                    expires_at = str(expires_at)
+                
+                # Get email_id or access_token (they should be the same)
+                email_id = email.get("email_id") or email.get("access_token")
+                access_token = email.get("access_token") or email.get("email_id")
+                
+                if not email_id or not access_token:
+                    logger.warning(f"Draft document missing email_id/access_token: {email.get('_id')}")
+                    continue
+                
                 result.append({
-                    "email_id": email.get("email_id"),
-                    "access_token": email.get("access_token"),
+                    "email_id": email_id,
+                    "access_token": access_token,
+                    "sender_email": email.get("sender_email"),
                     "recipient_emails": email.get("recipient_emails", []),
                     "subject": email.get("subject"),
                     "created_at": created_at,
+                    "expires_at": expires_at,
                     "has_passcode": email.get("has_passcode", False),
-                    "is_draft": email.get("is_draft", True),
+                    "is_draft": True,
                     "status": "draft",
                 })
             
