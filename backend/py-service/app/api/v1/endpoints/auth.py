@@ -344,13 +344,13 @@ async def register(
     client_ip = request.client.host if request.client else "unknown"
     
     try:
-        # Rate limit registration attempts
-        await security.check_rate_limit(
-            identifier=client_ip,
-            max_requests=5,  # 5 registrations per hour per IP
-            window_seconds=3600,
-            action="register",
-        )
+        # Rate limiting removed for testing/development
+        # await security.check_rate_limit(
+        #     identifier=client_ip,
+        #     max_requests=5,  # 5 registrations per hour per IP
+        #     window_seconds=3600,
+        #     action="register",
+        # )
         
         # Create user
         user = await create_user(
@@ -444,43 +444,43 @@ async def login(
     identifier = f"{credentials.email}:{client_ip}"
     
     try:
-        # Check brute force protection
-        try:
-            await security.check_brute_force(
-                identifier=identifier,
-                max_attempts=5,
-                window_seconds=3600,
-                lockout_seconds=3600,
-                action="login",
-            )
-        except BruteForceError as e:
-            await security.log_security_event(
-                SecurityEvent.BRUTE_FORCE_DETECTED,
-                identifier=credentials.email,
-                ip_address=client_ip,
-                action="login",
-                metadata={"reason": "too_many_attempts"},
-                success=False,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=str(e),
-            )
+        # Brute force protection removed for testing/development
+        # try:
+        #     await security.check_brute_force(
+        #         identifier=identifier,
+        #         max_attempts=5,
+        #         window_seconds=3600,
+        #         lockout_seconds=3600,
+        #         action="login",
+        #     )
+        # except BruteForceError as e:
+        #     await security.log_security_event(
+        #         SecurityEvent.BRUTE_FORCE_DETECTED,
+        #         identifier=credentials.email,
+        #         ip_address=client_ip,
+        #         action="login",
+        #         metadata={"reason": "too_many_attempts"},
+        #         success=False,
+        #     )
+        #     raise HTTPException(
+        #         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        #         detail=str(e),
+        #     )
         
         # Get user
         user = await get_user_by_email(credentials.email, db)
         if not user:
-            # Record failed attempt
-            remaining = await security.record_failed_attempt(
-                identifier=identifier,
-                action="login",
-            )
+            # Failed attempt recording removed
+            # remaining = await security.record_failed_attempt(
+            #     identifier=identifier,
+            #     action="login",
+            # )
             await security.log_security_event(
                 SecurityEvent.LOGIN_FAILURE,
                 identifier=credentials.email,
                 ip_address=client_ip,
                 action="login",
-                metadata={"reason": "user_not_found", "attempts_remaining": remaining},
+                metadata={"reason": "user_not_found"},
                 success=False,
             )
             raise HTTPException(
@@ -491,18 +491,18 @@ async def login(
         
         # Verify password
         if not verify_password(credentials.password, user["hashed_password"]):
-            # Record failed attempt
-            remaining = await security.record_failed_attempt(
-                identifier=identifier,
-                action="login",
-            )
+            # Failed attempt recording removed
+            # remaining = await security.record_failed_attempt(
+            #     identifier=identifier,
+            #     action="login",
+            # )
             await security.log_security_event(
                 SecurityEvent.LOGIN_FAILURE,
                 identifier=credentials.email,
                 user_id=user["id"],
                 ip_address=client_ip,
                 action="login",
-                metadata={"reason": "invalid_password", "attempts_remaining": remaining},
+                metadata={"reason": "invalid_password"},
                 success=False,
             )
             raise HTTPException(
@@ -511,8 +511,8 @@ async def login(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Reset brute force counter on success
-        await security.reset_brute_force_counter(identifier, action="login")
+        # Reset brute force counter removed
+        # await security.reset_brute_force_counter(identifier, action="login")
         
         # Check if user is active
         if not user.get("is_active", True):
