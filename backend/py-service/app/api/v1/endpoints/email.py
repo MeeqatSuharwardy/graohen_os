@@ -366,6 +366,176 @@ async def send_email(
         )
 
 
+# Inbox/Sent/Drafts Endpoints (MUST be before /{email_id} route to avoid route conflicts)
+
+@router.get("/inbox", response_model=EmailListResponse)
+async def get_inbox_emails(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get inbox emails (received emails).
+    
+    Returns list of emails where the current user is a recipient.
+    Only returns metadata (no encrypted content).
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        
+        emails = await service.get_inbox_emails(
+            user_email=user_email,
+            limit=limit,
+            offset=offset,
+        )
+        
+        # Get total count
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        total_query = {
+            "recipient_emails": {"$in": [user_email.lower()]},
+            "is_draft": False,
+            "$or": [
+                {"expires_at": {"$exists": False}},
+                {"expires_at": {"$gt": datetime.utcnow()}},
+            ],
+        }
+        total = await email_collection.count_documents(total_query)
+        
+        # Validate and create EmailListItem objects
+        email_items = []
+        for email in emails:
+            try:
+                email_items.append(EmailListItem(**email))
+            except Exception as validation_error:
+                logger.error(f"Failed to create EmailListItem: {validation_error}, email data: {email}", exc_info=True)
+                # Skip invalid email items but log the error
+                continue
+        
+        return EmailListResponse(
+            emails=email_items,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+        
+    except (EmailEncryptionError, MongoDBEmailEncryptionError) as e:
+        logger.error(f"Email encryption error in inbox: {e}", exc_info=True)
+        error_msg = str(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve inbox emails: {error_msg}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to get inbox emails: {e}", exc_info=True)
+        error_msg = str(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve inbox emails: {error_msg}"
+        )
+
+
+@router.get("/sent", response_model=EmailListResponse)
+async def get_sent_emails(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get sent emails.
+    
+    Returns list of emails sent by the current user.
+    Only returns metadata (no encrypted content).
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        
+        emails = await service.get_sent_emails(
+            user_email=user_email,
+            limit=limit,
+            offset=offset,
+        )
+        
+        # Get total count
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        total_query = {
+            "sender_email": user_email.lower(),
+            "is_draft": False,
+            "$or": [
+                {"expires_at": {"$exists": False}},
+                {"expires_at": {"$gt": datetime.utcnow()}},
+            ],
+        }
+        total = await email_collection.count_documents(total_query)
+        
+        return EmailListResponse(
+            emails=[EmailListItem(**email) for email in emails],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get sent emails: {e}", exc_info=True)
+        error_msg = str(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve sent emails: {error_msg}"
+        )
+
+
+@router.get("/drafts", response_model=EmailListResponse)
+async def get_draft_emails(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Get draft emails.
+    
+    Returns list of draft emails created by the current user.
+    Only returns metadata (no encrypted content).
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        
+        emails = await service.get_draft_emails(
+            user_email=user_email,
+            limit=limit,
+            offset=offset,
+        )
+        
+        # Get total count
+        from app.core.mongodb import get_mongodb
+        db = get_mongodb()
+        email_collection = db.emails
+        total = await email_collection.count_documents({
+            "sender_email": user_email.lower(),
+            "is_draft": True,
+        })
+        
+        return EmailListResponse(
+            emails=[EmailListItem(**email) for email in emails],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get draft emails: {e}", exc_info=True)
+        error_msg = str(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve draft emails: {error_msg}"
+        )
+
+
 @router.get("/{email_id}", response_model=EmailGetResponse)
 async def get_email(
     email_id: str,
@@ -866,159 +1036,6 @@ async def get_email_by_token(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve email"
-        )
-
-
-# Inbox/Sent/Drafts Endpoints
-
-@router.get("/inbox", response_model=EmailListResponse)
-async def get_inbox_emails(
-    limit: int = 50,
-    offset: int = 0,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """
-    Get inbox emails (received emails).
-    
-    Returns list of emails where the current user is a recipient.
-    Only returns metadata (no encrypted content).
-    """
-    try:
-        user_email = current_user.get("email")
-        service = get_email_service_mongodb()
-        
-        emails = await service.get_inbox_emails(
-            user_email=user_email,
-            limit=limit,
-            offset=offset,
-        )
-        
-        # Get total count
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        total_query = {
-            "recipient_emails": {"$in": [user_email.lower()]},
-            "is_draft": False,
-            "$or": [
-                {"expires_at": {"$exists": False}},
-                {"expires_at": {"$gt": datetime.utcnow()}},
-            ],
-        }
-        total = await email_collection.count_documents(total_query)
-        
-        return EmailListResponse(
-            emails=[EmailListItem(**email) for email in emails],
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
-        
-    except Exception as e:
-        logger.error(f"Failed to get inbox emails: {e}", exc_info=True)
-        error_msg = str(e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve inbox emails: {error_msg}"
-        )
-
-
-@router.get("/sent", response_model=EmailListResponse)
-async def get_sent_emails(
-    limit: int = 50,
-    offset: int = 0,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """
-    Get sent emails.
-    
-    Returns list of emails sent by the current user.
-    Only returns metadata (no encrypted content).
-    """
-    try:
-        user_email = current_user.get("email")
-        service = get_email_service_mongodb()
-        
-        emails = await service.get_sent_emails(
-            user_email=user_email,
-            limit=limit,
-            offset=offset,
-        )
-        
-        # Get total count
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        total_query = {
-            "sender_email": user_email.lower(),
-            "is_draft": False,
-            "$or": [
-                {"expires_at": {"$exists": False}},
-                {"expires_at": {"$gt": datetime.utcnow()}},
-            ],
-        }
-        total = await email_collection.count_documents(total_query)
-        
-        return EmailListResponse(
-            emails=[EmailListItem(**email) for email in emails],
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
-        
-    except Exception as e:
-        logger.error(f"Failed to get sent emails: {e}", exc_info=True)
-        error_msg = str(e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve sent emails: {error_msg}"
-        )
-
-
-@router.get("/drafts", response_model=EmailListResponse)
-async def get_draft_emails(
-    limit: int = 50,
-    offset: int = 0,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """
-    Get draft emails.
-    
-    Returns list of draft emails created by the current user.
-    Only returns metadata (no encrypted content).
-    """
-    try:
-        user_email = current_user.get("email")
-        service = get_email_service_mongodb()
-        
-        emails = await service.get_draft_emails(
-            user_email=user_email,
-            limit=limit,
-            offset=offset,
-        )
-        
-        # Get total count
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        total = await email_collection.count_documents({
-            "sender_email": user_email.lower(),
-            "is_draft": True,
-        })
-        
-        return EmailListResponse(
-            emails=[EmailListItem(**email) for email in emails],
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
-        
-    except Exception as e:
-        logger.error(f"Failed to get draft emails: {e}", exc_info=True)
-        error_msg = str(e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve draft emails: {error_msg}"
         )
 
 
