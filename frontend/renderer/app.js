@@ -43,7 +43,6 @@ const downloadBundleFirstCheckbox = document.getElementById('download-bundle-fir
 const downloadStatus = document.getElementById('download-status');
 const localBundlesInfo = document.getElementById('local-bundles-info');
 const refreshApksBtn = document.getElementById('refresh-apks-btn');
-const uploadApkBtn = document.getElementById('upload-apk-btn');
 const apkStatus = document.getElementById('apk-status');
 const apksList = document.getElementById('apks-list');
 const loadAllImagesBtn = document.getElementById('load-all-images-btn');
@@ -1362,42 +1361,6 @@ downloadBundleBtn.addEventListener('click', downloadBundle);
 closeJobBtn.addEventListener('click', closeJob);
 versionSelect.addEventListener('change', updateDownloadCheckboxState);
 refreshApksBtn.addEventListener('click', loadApks);
-
-/**
- * Handle APK file upload
- */
-uploadApkBtn.addEventListener('click', async () => {
-  try {
-    uploadApkBtn.disabled = true;
-    showApkStatus('Selecting APK file...', 'info');
-
-    // Call IPC handler to open file dialog and upload APK
-    const result = await window.electronAPI.uploadApk();
-
-    if (result.success) {
-      showApkStatus(`✓ ${result.message || 'APK uploaded successfully'}`, 'success');
-      appendLog(`[APK] ${result.message || 'APK uploaded successfully'}`, 'success');
-
-      // Refresh APK list after a short delay
-      setTimeout(() => {
-        loadApks();
-      }, 1000);
-    } else {
-      if (result.error !== 'No file selected') {
-        showApkStatus(`Failed to upload: ${result.error}`, 'error');
-        appendLog(`[APK] Failed to upload: ${result.error}`, 'error');
-      } else {
-        hideApkStatus(); // User cancelled, don't show error
-      }
-    }
-  } catch (error) {
-    console.error('Error uploading APK:', error);
-    showApkStatus(`Failed to upload: ${error.message}`, 'error');
-    appendLog(`[APK] Failed to upload: ${error.message}`, 'error');
-  } finally {
-    uploadApkBtn.disabled = false;
-  }
-});
 
 // ========== Theme (Light / Dark / Contrast) ==========
 const THEME_KEY = 'flashdash-theme';

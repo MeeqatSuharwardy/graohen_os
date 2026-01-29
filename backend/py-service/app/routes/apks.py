@@ -446,6 +446,75 @@ async def install_apk(request: InstallAPKRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _validate_apk_filename(filename: str) -> None:
+    """Validate filename to prevent directory traversal and ensure .apk extension."""
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not filename.lower().endswith(".apk"):
+        raise HTTPException(status_code=400, detail="File must be an APK file (.apk)")
+
+
+@router.delete("/{filename}")
+async def delete_apk(filename: str):
+    """
+    Delete an APK file from storage.
+    """
+    try:
+        _validate_apk_filename(filename)
+        apk_path = APK_STORAGE_DIR / filename
+        if not apk_path.exists():
+            raise HTTPException(status_code=404, detail=f"APK not found: {filename}")
+        if not apk_path.is_file():
+            raise HTTPException(status_code=400, detail=f"Path is not a file: {filename}")
+        apk_path.unlink()
+        logger.info(f"APK deleted: {filename}")
+        return {"success": True, "message": f"APK {filename} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting APK: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete APK: {str(e)}")
+
+
+@router.put("/{filename}")
+async def update_apk(
+    filename: str,
+    file: UploadFile = File(...),
+    username: str = Form(None),
+    password: str = Form(None),
+):
+    """
+    Update (replace) an existing APK file. Upload a new file to overwrite the existing one.
+    Password required (same as upload): password = APK_UPLOAD_PASSWORD.
+    """
+    if password != APK_UPLOAD_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid password")
+    try:
+        _validate_apk_filename(filename)
+        if not file.filename or not file.filename.lower().endswith(".apk"):
+            raise HTTPException(status_code=400, detail="File must be an APK file (.apk)")
+        apk_path = APK_STORAGE_DIR / filename
+        if not apk_path.exists():
+            raise HTTPException(status_code=404, detail=f"APK not found: {filename}. Create it via upload first.")
+        if not apk_path.is_file():
+            raise HTTPException(status_code=400, detail=f"Path is not a file: {filename}")
+        content = await file.read()
+        with open(apk_path, "wb") as f:
+            f.write(content)
+        logger.info(f"APK updated: {filename} ({len(content)} bytes)")
+        return {
+            "success": True,
+            "message": f"APK {filename} updated",
+            "filename": filename,
+            "size": len(content),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating APK: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update APK: {str(e)}")
+
+
 @router.get("/download/{filename}")
 async def download_apk(filename: str):
     """
@@ -461,15 +530,7 @@ async def download_apk(filename: str):
         GET /apks/download/my-app.apk
     """
     try:
-        # Validate filename to prevent directory traversal attacks
-        if not filename or '..' in filename or '/' in filename or '\\' in filename:
-            raise HTTPException(status_code=400, detail="Invalid filename")
-        
-        # Ensure filename ends with .apk extension
-        if not filename.lower().endswith('.apk'):
-            raise HTTPException(status_code=400, detail="File must be an APK file (.apk)")
-        
-        # Resolve the full path to the APK file
+        _validate_apk_filename(filename)
         apk_path = APK_STORAGE_DIR / filename
         
         # Check if file exists

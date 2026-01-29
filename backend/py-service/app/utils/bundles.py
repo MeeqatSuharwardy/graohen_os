@@ -113,9 +113,15 @@ def index_bundles() -> Dict[str, List[Dict[str, Any]]]:
                     if version_dir.name.startswith('.'):
                         continue
                     
-                    # Version is the directory name (e.g., "2025122500")
+                    # Version is the directory name (e.g., "2026012100")
                     version = version_dir.name
-                    bundle_info = get_bundle_info(codename, version, version_dir)
+                    # Support layout: bundles/codename/version/codename-install-version/ (actual files inside)
+                    install_subdir = version_dir / f"{codename}-install-{version}"
+                    if install_subdir.is_dir():
+                        bundle_path_to_use = install_subdir
+                    else:
+                        bundle_path_to_use = version_dir
+                    bundle_info = get_bundle_info(codename, version, bundle_path_to_use)
                     if bundle_info:
                         versions.append(bundle_info)
             except (PermissionError, OSError) as e:
@@ -184,7 +190,30 @@ def get_bundle_info(codename: str, version: str, bundle_path: Path) -> Optional[
                 },
             },
         }
-    
+
+    # Install-directory layout: bundles/codename/version/codename-install-version/ with extracted
+    # files (flash-all.sh, flash-all.bat, super_*.img, boot.img, etc.) - no image.zip
+    flash_sh = bundle_path / "flash-all.sh"
+    flash_bat = bundle_path / "flash-all.bat"
+    has_flash = flash_sh.exists() or flash_bat.exists()
+    has_imgs = (bundle_path / "boot.img").exists() or bool(list(bundle_path.glob("super_*.img")))
+    if has_flash and has_imgs:
+        return {
+            "codename": codename,
+            "version": version,
+            "deviceName": codename,
+            "path": str(bundle_path),
+            "downloadUrl": f"https://releases.grapheneos.org/{codename}-factory-{version}.zip",
+            "metadata": {
+                "codename": codename,
+                "version": version,
+                "files": {
+                    "flashSh": "flash-all.sh",
+                    "flashBat": "flash-all.bat",
+                },
+            },
+        }
+
     return None
 
 
@@ -234,9 +263,13 @@ def get_bundle_for_codename(codename: str, version: Optional[str] = None) -> Opt
                     if not version_dir.is_dir() or version_dir.name.startswith('.'):
                         continue
                     
-                    # Version is the directory name (e.g., "2025122500")
                     version = version_dir.name
-                    bundle_info = get_bundle_info(codename, version, version_dir)
+                    install_subdir = version_dir / f"{codename}-install-{version}"
+                    if install_subdir.is_dir():
+                        bundle_path_to_use = install_subdir
+                    else:
+                        bundle_path_to_use = version_dir
+                    bundle_info = get_bundle_info(codename, version, bundle_path_to_use)
                     if bundle_info:
                         versions.append(bundle_info)
                 
