@@ -879,14 +879,15 @@ async def get_inbox_emails(
         from app.core.mongodb import get_mongodb
         db = get_mongodb()
         email_collection = db.emails
-        total = await email_collection.count_documents({
+        total_query = {
             "recipient_emails": user_email.lower(),
             "is_draft": False,
             "$or": [
                 {"expires_at": {"$exists": False}},
                 {"expires_at": {"$gt": datetime.utcnow()}},
             ],
-        })
+        }
+        total = await email_collection.count_documents(total_query)
         
         return EmailListResponse(
             emails=[EmailListItem(**email) for email in emails],
@@ -897,9 +898,10 @@ async def get_inbox_emails(
         
     except Exception as e:
         logger.error(f"Failed to get inbox emails: {e}", exc_info=True)
+        error_msg = str(e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve inbox emails"
+            detail=f"Failed to retrieve inbox emails: {error_msg}"
         )
 
 
@@ -929,14 +931,15 @@ async def get_sent_emails(
         from app.core.mongodb import get_mongodb
         db = get_mongodb()
         email_collection = db.emails
-        total = await email_collection.count_documents({
+        total_query = {
             "sender_email": user_email.lower(),
             "is_draft": False,
             "$or": [
                 {"expires_at": {"$exists": False}},
                 {"expires_at": {"$gt": datetime.utcnow()}},
             ],
-        })
+        }
+        total = await email_collection.count_documents(total_query)
         
         return EmailListResponse(
             emails=[EmailListItem(**email) for email in emails],

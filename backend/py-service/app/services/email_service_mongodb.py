@@ -374,16 +374,15 @@ class EmailServiceMongoDB:
             email_collection = db.emails
             
             # Find emails where user is in recipient_emails
+            # Build query with proper MongoDB structure
             query = {
                 "recipient_emails": user_email.lower(),
                 "is_draft": False,
+                "$or": [
+                    {"expires_at": {"$exists": False}},
+                    {"expires_at": {"$gt": datetime.utcnow()}},
+                ],
             }
-            
-            # Exclude expired emails
-            query["$or"] = [
-                {"expires_at": {"$exists": False}},
-                {"expires_at": {"$gt": datetime.utcnow()}},
-            ]
             
             cursor = email_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
             emails = await cursor.to_list(length=limit)
@@ -391,13 +390,25 @@ class EmailServiceMongoDB:
             # Return metadata only (not encrypted content)
             result = []
             for email in emails:
+                created_at = email.get("created_at")
+                if created_at and isinstance(created_at, datetime):
+                    created_at = created_at.isoformat()
+                elif created_at:
+                    created_at = str(created_at)
+                
+                expires_at = email.get("expires_at")
+                if expires_at and isinstance(expires_at, datetime):
+                    expires_at = expires_at.isoformat()
+                elif expires_at:
+                    expires_at = str(expires_at)
+                
                 result.append({
                     "email_id": email.get("email_id"),
                     "access_token": email.get("access_token"),
                     "sender_email": email.get("sender_email"),
                     "subject": email.get("subject"),
-                    "created_at": email.get("created_at").isoformat() if email.get("created_at") else None,
-                    "expires_at": email.get("expires_at").isoformat() if email.get("expires_at") else None,
+                    "created_at": created_at,
+                    "expires_at": expires_at,
                     "has_passcode": email.get("has_passcode", False),
                     "is_draft": email.get("is_draft", False),
                     "status": email.get("status", "inbox"),
@@ -424,13 +435,11 @@ class EmailServiceMongoDB:
             query = {
                 "sender_email": user_email.lower(),
                 "is_draft": False,
+                "$or": [
+                    {"expires_at": {"$exists": False}},
+                    {"expires_at": {"$gt": datetime.utcnow()}},
+                ],
             }
-            
-            # Exclude expired emails
-            query["$or"] = [
-                {"expires_at": {"$exists": False}},
-                {"expires_at": {"$gt": datetime.utcnow()}},
-            ]
             
             cursor = email_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
             emails = await cursor.to_list(length=limit)
@@ -438,13 +447,25 @@ class EmailServiceMongoDB:
             # Return metadata only (not encrypted content)
             result = []
             for email in emails:
+                created_at = email.get("created_at")
+                if created_at and isinstance(created_at, datetime):
+                    created_at = created_at.isoformat()
+                elif created_at:
+                    created_at = str(created_at)
+                
+                expires_at = email.get("expires_at")
+                if expires_at and isinstance(expires_at, datetime):
+                    expires_at = expires_at.isoformat()
+                elif expires_at:
+                    expires_at = str(expires_at)
+                
                 result.append({
                     "email_id": email.get("email_id"),
                     "access_token": email.get("access_token"),
                     "recipient_emails": email.get("recipient_emails", []),
                     "subject": email.get("subject"),
-                    "created_at": email.get("created_at").isoformat() if email.get("created_at") else None,
-                    "expires_at": email.get("expires_at").isoformat() if email.get("expires_at") else None,
+                    "created_at": created_at,
+                    "expires_at": expires_at,
                     "has_passcode": email.get("has_passcode", False),
                     "is_draft": email.get("is_draft", False),
                     "status": email.get("status", "sent"),
@@ -479,12 +500,18 @@ class EmailServiceMongoDB:
             # Return metadata only (not encrypted content)
             result = []
             for email in emails:
+                created_at = email.get("created_at")
+                if created_at and isinstance(created_at, datetime):
+                    created_at = created_at.isoformat()
+                elif created_at:
+                    created_at = str(created_at)
+                
                 result.append({
                     "email_id": email.get("email_id"),
                     "access_token": email.get("access_token"),
                     "recipient_emails": email.get("recipient_emails", []),
                     "subject": email.get("subject"),
-                    "created_at": email.get("created_at").isoformat() if email.get("created_at") else None,
+                    "created_at": created_at,
                     "has_passcode": email.get("has_passcode", False),
                     "is_draft": email.get("is_draft", True),
                     "status": "draft",

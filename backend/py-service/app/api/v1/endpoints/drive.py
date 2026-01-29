@@ -110,6 +110,25 @@ class StorageQuotaResponse(BaseModel):
     percentage_used: float
 
 
+class FileListItem(BaseModel):
+    """File list item (metadata only, no encrypted content)"""
+    file_id: str
+    filename: str
+    size: int
+    content_type: Optional[str] = None
+    passcode_protected: bool
+    created_at: str
+    expires_at: Optional[str] = None
+
+
+class FileListResponse(BaseModel):
+    """File list response"""
+    files: List[FileListItem]
+    total: int
+    limit: int
+    offset: int
+
+
 class FileUploadEncryptedRequest(BaseModel):
     """File upload request with pre-encrypted content (client-side encryption)"""
     filename: str = Field(..., description="Original filename")
@@ -1074,22 +1093,14 @@ async def delete_file(
         # Get file size and owner before deletion
         file_size = metadata.get("size", 0)
         
-        # Delete file data and metadata
+        # Delete file from MongoDB
+        drive_service = get_drive_service_mongodb()
+        deleted = await drive_service.delete_file(file_id)
+        
+        # Delete from Redis (cleanup)
         redis = await get_redis()
         
-        deleted = 0
-        
-        # Delete encrypted file
-        file_key = f"{REDIS_FILE_PREFIX}{file_id}"
-        if await redis.delete(file_key):
-            deleted += 1
-        
-        # Delete metadata
-        metadata_key = f"{REDIS_FILE_METADATA_PREFIX}{file_id}"
-        if await redis.delete(metadata_key):
-            deleted += 1
-        
-        # Delete passcode salt
+        # Delete passcode salt (if exists)
         salt_key = f"drive:passcode_salt:{file_id}"
         await redis.delete(salt_key)
         
@@ -1102,7 +1113,7 @@ async def delete_file(
             await decrement_user_storage(owner_email, file_size)
             await remove_user_file(owner_email, file_id)
         
-        if deleted > 0:
+        if deleted:
             logger.info(f"File deleted: id={file_id[:8]}...")
             return FileDeleteResponse(
                 file_id=file_id,
@@ -1122,5 +1133,84 @@ async def delete_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete file"
+        )
+
+
+@router.get("/files", response_model=FileListResponse)
+async def list_files(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    List all files for the current user.
+    
+    Returns file metadata only (no encrypted content).
+    Supports pagination with limit and offset.
+    """
+    try:
+        user_email = current_user.get("email")
+        
+        # Query MongoDB for user's files
+        db = get_mongodb()
+        files_collection = db.files
+        
+        # Build query
+        query = {
+            "owner_email": user_email.lower(),
+        }
+        
+        # Exclude expired files
+        query["$or"] = [
+            {"expires_at": {"$exists": False}},
+            {"expires_at": {"$gt": datetime.utcnow()}},
+        ]
+        
+        # Get total count
+        total = await files_collection.count_documents(query)
+        
+        # Get files with pagination
+        cursor = files_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
+        file_docs = await cursor.to_list(length=limit)
+        
+        # Convert to response format
+        files = []
+        for file_doc in file_docs:
+            expires_at = None
+            if file_doc.get("expires_at"):
+                expires_at_value = file_doc["expires_at"]
+                if isinstance(expires_at_value, datetime):
+                    expires_at = expires_at_value.isoformat()
+                else:
+                    expires_at = expires_at_value
+            
+            created_at = file_doc.get("created_at")
+            if isinstance(created_at, datetime):
+                created_at = created_at.isoformat()
+            
+            files.append(FileListItem(
+                file_id=file_doc.get("file_id"),
+                filename=file_doc.get("filename", "unnamed"),
+                size=file_doc.get("size", 0),
+                content_type=file_doc.get("content_type"),
+                passcode_protected=file_doc.get("passcode_protected", False),
+                created_at=created_at or datetime.utcnow().isoformat(),
+                expires_at=expires_at,
+            ))
+        
+        logger.info(f"Listed {len(files)} files for user: {user_email}")
+        
+        return FileListResponse(
+            files=files,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to list files: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list files"
         )
 

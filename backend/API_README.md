@@ -7,6 +7,7 @@ Complete API reference for building mobile applications with end-to-end encrypti
 - [Understanding End-to-End Encryption](#understanding-end-to-end-encryption)
 - [Base URL](#base-url)
 - [Authentication](#authentication)
+  - [📘 Complete Authentication Guide](./AUTHENTICATION_GUIDE.md) - Detailed guide for implementing registration and login
 - [Email API](#email-api)
   - [Send Encrypted Email](#send-encrypted-email)
   - [Get Email](#get-email-authenticated-users)
@@ -19,6 +20,7 @@ Complete API reference for building mobile applications with end-to-end encrypti
   - [Unlock Passcode-Protected Email](#unlock-passcode-protected-email)
   - [Delete Email](#delete-email)
 - [Drive API](#drive-api)
+  - [📘 Complete Drive API Guide](./DRIVE_API_GUIDE.md) - Detailed guide for implementing file storage (like Google Drive)
 - [Messaging API](#messaging-api)
 - [Error Handling](#error-handling)
 - [End-to-End Encryption Guide](#end-to-end-encryption-guide)
@@ -334,6 +336,16 @@ All endpoints require authentication unless specified otherwise.
 ---
 
 ## Authentication
+
+> **📘 For a complete guide on implementing authentication in your frontend application, see [AUTHENTICATION_GUIDE.md](./AUTHENTICATION_GUIDE.md)**
+> 
+> The authentication guide includes:
+> - Detailed explanation of how registration and login work on the API side
+> - Step-by-step frontend implementation guide
+> - Token management examples
+> - Error handling strategies
+> - Security best practices
+> - Complete React Native code examples
 
 ### Register User
 
@@ -1129,6 +1141,15 @@ Authorization: Bearer {access_token}
 
 ## Drive API
 
+> **📘 For a complete guide on implementing encrypted file storage (like Google Drive) in your frontend application, see [DRIVE_API_GUIDE.md](./DRIVE_API_GUIDE.md)**
+> 
+> The drive guide includes:
+> - Detailed explanation of how file upload/download/list work on the API side
+> - Step-by-step frontend implementation guide
+> - Storage quota management
+> - File encryption and security
+> - Complete React Native and Web code examples
+
 ### Drive Storage & Database
 
 **Storage:**
@@ -1369,6 +1390,65 @@ const uploadEncryptedFile = async (
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.detail || 'Failed to upload encrypted file');
+  }
+  
+  return await response.json();
+};
+```
+
+### List Files
+
+Get list of all files for the current user (like Google Drive file list).
+
+**Endpoint:** `GET /drive/files`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Query Parameters:**
+- `limit` (optional): Number of files to return (default: 50, max: 100)
+- `offset` (optional): Offset for pagination (default: 0)
+
+**Response:**
+```json
+{
+  "files": [
+    {
+      "file_id": "Aa6wVDnKTqIY9Rwhv8aOhlRfEsE6ySLz5psMKcYCFaA",
+      "filename": "document.pdf",
+      "size": 1048576,
+      "content_type": "application/pdf",
+      "passcode_protected": false,
+      "created_at": "2026-01-29T20:45:51.168035",
+      "expires_at": null
+    }
+  ],
+  "total": 25,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Example:**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1'; // Production
+
+const listFiles = async (accessToken, limit = 50, offset = 0) => {
+  const response = await fetch(
+    `${API_BASE_URL}/drive/files?limit=${limit}&offset=${offset}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    }
+  );
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to list files');
   }
   
   return await response.json();
