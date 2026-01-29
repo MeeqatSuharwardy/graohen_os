@@ -950,9 +950,10 @@ async def get_sent_emails(
         
     except Exception as e:
         logger.error(f"Failed to get sent emails: {e}", exc_info=True)
+        error_msg = str(e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve sent emails"
+            detail=f"Failed to retrieve sent emails: {error_msg}"
         )
 
 
@@ -996,9 +997,10 @@ async def get_draft_emails(
         
     except Exception as e:
         logger.error(f"Failed to get draft emails: {e}", exc_info=True)
+        error_msg = str(e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve draft emails"
+            detail=f"Failed to retrieve draft emails: {error_msg}"
         )
 
 
