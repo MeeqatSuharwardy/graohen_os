@@ -93,7 +93,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /**
-   * Install APK on connected device
+   * Download APK from server to local app storage
+   * @param {string} apkFilename - APK filename
+   * @returns {Promise<{success: boolean, path?: string, cached?: boolean, error?: string}>}
+   */
+  downloadApk: (apkFilename) => ipcRenderer.invoke('download-apk', apkFilename),
+
+  /**
+   * Install APK on connected device (downloads if needed, runs adb install, streams output to log)
    * @param {string} deviceSerial - Device serial number
    * @param {string} apkFilename - APK filename
    * @returns {Promise<{success: boolean, error?: string, message?: string}>}
@@ -107,6 +114,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   uploadApk: () => 
     ipcRenderer.invoke('upload-apk'),
+
+  /**
+   * Listen for log lines from main (adb install output, flash script output, etc.)
+   * @param {function({message: string, level?: string})} callback
+   * @returns {function} - Unsubscribe function
+   */
+  onLogLine: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('log-line', handler);
+    return () => ipcRenderer.removeListener('log-line', handler);
+  },
 
   /**
    * Get auto-flash configuration

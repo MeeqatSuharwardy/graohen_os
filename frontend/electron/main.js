@@ -1374,82 +1374,139 @@ ipcMain.handle('execute-local-flash', async (event, deviceSerial, codename, vers
 });
 
 /**
- * Handle install APK request
+ * Send a log line to the renderer (for adb install / flash script output)
  */
-ipcMain.handle('install-apk', async (event, deviceSerial, apkFilename) => {
-  console.log(`[IPC] install-apk handler called for device ${deviceSerial}, APK ${apkFilename}`);
+function sendLogLine(webContents, message, level = 'info') {
+  if (webContents && !webContents.isDestroyed()) {
+    webContents.send('log-line', { message, level });
+  }
+}
+
+/**
+ * Handle download APK request - download from backend to userData/apks
+ */
+ipcMain.handle('download-apk', async (event, apkFilename) => {
+  console.log(`[IPC] download-apk handler called for ${apkFilename}`);
   try {
-    console.log(`[APK] Installing ${apkFilename} on device ${deviceSerial}`);
-
-    // Find ADB path
-    const adbPath = await findAdbPath();
-    console.log(`[APK] Using ADB at: ${adbPath}`);
-
-    // Download APK from backend
     const downloadUrl = `${BACKEND_URL}/apks/download/${encodeURIComponent(apkFilename)}`;
-    console.log(`[APK] Downloading APK from: ${downloadUrl}`);
-
-    // Create APK storage directory
     const apkStorageDir = path.join(app.getPath('userData'), 'apks');
     await fs.mkdir(apkStorageDir, { recursive: true });
     const localApkPath = path.join(apkStorageDir, apkFilename);
 
-    // Check if APK already exists locally
+    try {
+      await fs.access(localApkPath);
+      console.log(`[APK] Already downloaded: ${localApkPath}`);
+      return { success: true, path: localApkPath, cached: true };
+    } catch (_) {
+      // not found, download
+    }
+
+    await new Promise((resolve, reject) => {
+      const parsedUrl = new URL(downloadUrl);
+      const httpModule = parsedUrl.protocol === 'https:' ? https : http;
+      const file = fsSync.createWriteStream(localApkPath);
+
+      const request = httpModule.get(downloadUrl, (response) => {
+        if (response.statusCode !== 200) {
+          file.close();
+          fsSync.unlink(localApkPath, () => {});
+          reject(new Error(`Failed to download APK: HTTP ${response.statusCode}`));
+          return;
+        }
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          console.log(`[APK] Downloaded to: ${localApkPath}`);
+          resolve();
+        });
+      });
+
+      request.on('error', (err) => {
+        file.close();
+        fsSync.unlink(localApkPath, () => {});
+        reject(err);
+      });
+      file.on('error', (err) => {
+        file.close();
+        fsSync.unlink(localApkPath, () => {});
+        reject(err);
+      });
+    });
+
+    return { success: true, path: localApkPath, cached: false };
+  } catch (error) {
+    console.error('[APK] Download error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Handle install APK request
+ * Downloads APK if needed, runs adb install, streams output to app log
+ */
+ipcMain.handle('install-apk', async (event, deviceSerial, apkFilename) => {
+  console.log(`[IPC] install-apk handler called for device ${deviceSerial}, APK ${apkFilename}`);
+  const sendLog = (msg, level) => sendLogLine(event.sender, msg, level);
+
+  try {
+    sendLog(`[APK] Installing ${apkFilename} on device ${deviceSerial}`, 'info');
+
+    const adbPath = await findAdbPath();
+    sendLog(`[APK] Using ADB: ${adbPath}`, 'info');
+
+    const downloadUrl = `${BACKEND_URL}/apks/download/${encodeURIComponent(apkFilename)}`;
+    const apkStorageDir = path.join(app.getPath('userData'), 'apks');
+    await fs.mkdir(apkStorageDir, { recursive: true });
+    const localApkPath = path.join(apkStorageDir, apkFilename);
+
     let apkExists = false;
     try {
       await fs.access(localApkPath);
       apkExists = true;
-      console.log(`[APK] APK already exists locally: ${localApkPath}`);
-    } catch (error) {
-      // APK doesn't exist, will download
-    }
+      sendLog(`[APK] Using local file: ${localApkPath}`, 'info');
+    } catch (_) {}
 
-    // Download APK if not exists
     if (!apkExists) {
+      sendLog(`[APK] Downloading from server...`, 'info');
       await new Promise((resolve, reject) => {
         const parsedUrl = new URL(downloadUrl);
-        const isHttps = parsedUrl.protocol === 'https:';
-        const httpModule = isHttps ? https : http;
-
+        const httpModule = parsedUrl.protocol === 'https:' ? https : http;
         const file = fsSync.createWriteStream(localApkPath);
 
         const request = httpModule.get(downloadUrl, (response) => {
           if (response.statusCode !== 200) {
             file.close();
-            fsSync.unlink(localApkPath, () => { });
+            fsSync.unlink(localApkPath, () => {});
             reject(new Error(`Failed to download APK: HTTP ${response.statusCode}`));
             return;
           }
-
           response.pipe(file);
-
           file.on('finish', () => {
             file.close();
-            console.log(`[APK] Downloaded APK to: ${localApkPath}`);
+            sendLog(`[APK] Downloaded to: ${localApkPath}`, 'info');
             resolve();
           });
         });
 
-        request.on('error', (error) => {
+        request.on('error', (err) => {
           file.close();
-          fsSync.unlink(localApkPath, () => { });
-          reject(error);
+          fsSync.unlink(localApkPath, () => {});
+          reject(err);
         });
-
-        file.on('error', (error) => {
+        file.on('error', (err) => {
           file.close();
-          fsSync.unlink(localApkPath, () => { });
-          reject(error);
+          fsSync.unlink(localApkPath, () => {});
+          reject(err);
         });
       });
     }
 
-    // Install APK using local ADB
-    console.log(`[APK] Installing APK on device ${deviceSerial}...`);
     const installCmd = [adbPath, '-s', deviceSerial, 'install', '-r', localApkPath];
+    const cmdStr = `adb -s ${deviceSerial} install -r "${localApkPath}"`;
+    sendLog(`[APK] Running: ${cmdStr}`, 'info');
 
     return new Promise((resolve) => {
-      const process = spawn(installCmd[0], installCmd.slice(1), {
+      const proc = spawn(installCmd[0], installCmd.slice(1), {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: false
       });
@@ -1457,32 +1514,37 @@ ipcMain.handle('install-apk', async (event, deviceSerial, apkFilename) => {
       let stdout = '';
       let stderr = '';
 
-      process.stdout.on('data', (data) => {
-        stdout += data.toString();
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        stdout += text;
+        text.split('\n').filter(Boolean).forEach((line) => sendLog(line, 'info'));
       });
 
-      process.stderr.on('data', (data) => {
-        stderr += data.toString();
+      proc.stderr.on('data', (data) => {
+        const text = data.toString();
+        stderr += text;
+        text.split('\n').filter(Boolean).forEach((line) => sendLog(line, 'info'));
       });
 
-      process.on('close', (code) => {
+      proc.on('close', (code) => {
         if (code === 0) {
-          console.log(`[APK] Installation successful`);
+          sendLog(`[APK] Installation successful`, 'success');
           resolve({ success: true, message: `APK ${apkFilename} installed successfully` });
         } else {
           const errorMsg = stderr || stdout || `ADB install failed with code ${code}`;
-          console.error(`[APK] Installation failed:`, errorMsg);
+          sendLog(`[APK] Install failed: ${errorMsg}`, 'error');
           resolve({ success: false, error: `Failed to install APK: ${errorMsg}` });
         }
       });
 
-      process.on('error', (error) => {
-        console.error(`[APK] Process error:`, error);
-        resolve({ success: false, error: `Failed to execute ADB: ${error.message}` });
+      proc.on('error', (err) => {
+        sendLog(`[APK] Process error: ${err.message}`, 'error');
+        resolve({ success: false, error: `Failed to execute ADB: ${err.message}` });
       });
     });
   } catch (error) {
     console.error('[APK] Install error:', error);
+    sendLog(`[APK] Error: ${error.message}`, 'error');
     return { success: false, error: error.message };
   }
 });

@@ -1236,6 +1236,14 @@ function renderApks() {
         </div>
         <div class="apk-actions">
           <button 
+            class="btn btn-secondary btn-sm download-apk-btn" 
+            data-filename="${apk.filename}"
+            title="Download APK to this computer"
+          >
+            <span class="btn-icon">⬇</span>
+            Download APK
+          </button>
+          <button 
             class="btn btn-primary btn-sm install-apk-btn" 
             data-filename="${apk.filename}"
             ${!canInstall ? `disabled title="${tooltipMessage}"` : ''}
@@ -1263,10 +1271,44 @@ function renderApks() {
       await installApk(filename);
     });
   });
+
+  // Add event listeners to download buttons
+  document.querySelectorAll('.download-apk-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const filename = e.target.closest('.download-apk-btn').dataset.filename;
+      await downloadApk(filename);
+    });
+  });
 }
 
 /**
- * Install APK on selected device
+ * Download APK from server to local app storage
+ */
+async function downloadApk(filename) {
+  try {
+    showApkStatus(`Downloading ${filename}...`, 'info');
+    appendLog(`[APK] Downloading ${filename}...`, 'info');
+
+    const result = await window.electronAPI.downloadApk(filename);
+
+    if (result.success) {
+      const msg = result.cached
+        ? `✓ ${filename} already downloaded (cached)`
+        : `✓ ${filename} downloaded successfully`;
+      showApkStatus(msg, 'success');
+      appendLog(`[APK] ${msg}`, 'success');
+    } else {
+      throw new Error(result.error || 'Download failed');
+    }
+  } catch (error) {
+    console.error('Error downloading APK:', error);
+    showApkStatus(`Failed to download ${filename}: ${error.message}`, 'error');
+    appendLog(`[APK] Failed to download ${filename}: ${error.message}`, 'error');
+  }
+}
+
+/**
+ * Install APK on selected device (runs adb install; output streams to log)
  */
 async function installApk(filename) {
   if (!selectedDevice || !selectedDevice.serial) {
@@ -1384,6 +1426,13 @@ function initTheme() {
 }
 
 initTheme();
+
+// Subscribe to log lines from main (adb install output, flash script output)
+if (window.electronAPI && typeof window.electronAPI.onLogLine === 'function') {
+  window.electronAPI.onLogLine((data) => {
+    appendLog(data.message || '', data.level || 'info');
+  });
+}
 
 // Initialize
 console.log('FlashDash Client initialized');
