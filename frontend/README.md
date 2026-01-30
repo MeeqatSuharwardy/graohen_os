@@ -148,11 +148,77 @@ From **`frontend/electron/`**:
 | Mac Intel         | `npx electron-builder --mac --x64`        | `FlashDash-1.0.0-x64.dmg`        |
 | Mac Apple Silicon | `npx electron-builder --mac --arm64`     | `FlashDash-1.0.0-arm64.dmg`      |
 | Mac both          | `npx electron-builder --mac --x64 --arm64`| Both DMGs                         |
+| Windows unpacked  | `npx electron-builder --win --dir`        | `build/win-unpacked/` (folder)    |
+| Mac unpacked      | `npx electron-builder --mac --dir`        | `build/mac/` (FlashDash.app)      |
 
 - **Windows:** Unsigned exe may trigger SmartScreen; user can “Unblock” / “Run anyway”. See `BUILD_README.md` for details.
 - **macOS:** For DMG you need `icon.icns` in `frontend/assets/`. Build on a Mac for DMG.
 
 The built app uses the same logic as in dev: same backend URL, same userData paths, same flash script and unzip behavior per platform.
+
+---
+
+## Distributing the built app
+
+After building, you get either an **installer** (exe / dmg) or an **unpacked folder** (`win-unpacked` / `mac`). You can distribute either; the unpacked folder is useful for WeTransfer or when users prefer "no installer".
+
+### Build output locations (in `frontend/build/`)
+
+| Platform | Installer build        | Unpacked build (`--dir`)     |
+|----------|------------------------|------------------------------|
+| Windows  | `FlashDash Setup 1.0.0.exe` | `win-unpacked/` (folder with exe + DLLs) |
+| macOS    | `FlashDash-1.0.0-arm64.dmg` (and/or `-x64.dmg`) | `mac/FlashDash.app` (or under `mac-arm64/` / `mac/`) |
+
+### Option A: Distribute the installer (simplest)
+
+- **Windows:** Share `FlashDash Setup 1.0.0.exe`. User runs it and installs like any app.
+- **macOS:** Share the `.dmg` file. User opens DMG and drags **FlashDash** to Applications.
+
+### Option B: Distribute the unpacked folder (e.g. WeTransfer)
+
+Useful when the file host has size limits or you want a single zip per platform.
+
+#### Windows (win-unpacked)
+
+1. Build unpacked:
+   ```bash
+   cd frontend/electron
+   npx electron-builder --win --dir
+   ```
+2. You get **`frontend/build/win-unpacked/`** (contains `FlashDash.exe`, DLLs, resources).
+3. **Zip the whole folder:**
+   - Right-click `win-unpacked` → **Send to → Compressed (zipped) folder**, or  
+   - `powershell Compress-Archive -Path win-unpacked -DestinationPath FlashDash-Windows-portable.zip`
+4. Upload **FlashDash-Windows-portable.zip** (e.g. WeTransfer, Google Drive, Dropbox).
+5. **Tell users:** Download the zip → unzip anywhere → run **FlashDash.exe** inside the folder. No installer. They need **adb** (and **fastboot** for flashing) in PATH.
+
+#### macOS (unpacked .app)
+
+1. Build unpacked:
+   ```bash
+   cd frontend/electron
+   npx electron-builder --mac --dir
+   ```
+2. You get **`frontend/build/mac/FlashDash.app`** (or under `mac-arm64/` / `mac/` depending on arch).
+3. **Zip the .app:**
+   - Right-click **FlashDash.app** → **Compress "FlashDash.app"**, or  
+   - `zip -r FlashDash-mac.zip FlashDash.app`
+4. Upload **FlashDash-mac.zip** (or one zip per arch: e.g. **FlashDash-mac-arm64.zip**, **FlashDash-mac-intel.zip**).
+5. **Tell users:** Download the zip → unzip → move **FlashDash.app** to Applications (or run from anywhere). First time: right-click → Open if macOS blocks unsigned apps. They need **adb** (and **fastboot**) in PATH.
+
+### Where to upload (WeTransfer, etc.)
+
+| Service        | Use case                          |
+|----------------|-----------------------------------|
+| **WeTransfer** | Send zip/exe/dmg; link expires in 7 days (free). |
+| **Google Drive / Dropbox** | Share a link; keep file as long as you want. |
+| **GitHub Releases** | Attach `FlashDash Setup x.x.x.exe`, `FlashDash-x.x.x-arm64.dmg`, and zips; good for public distribution. |
+| **Your own server** | Host the files and share download links. |
+
+### Summary for recipients
+
+- **Windows:** Install **adb** (Android Platform Tools), then either run the **installer** or **unzip the portable zip** and run **FlashDash.exe**. If SmartScreen appears, use "More info" → "Run anyway".
+- **macOS:** Install **adb** (`brew install android-platform-tools`), then open the **DMG** and drag to Applications, or **unzip** and open **FlashDash.app** (right-click → Open if blocked).
 
 ---
 

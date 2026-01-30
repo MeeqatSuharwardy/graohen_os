@@ -10,6 +10,10 @@ Build the FlashDash Electron app for **Windows** (unsigned exe, SmartScreen bypa
 - **Electron Builder**: `npm install` in `electron/` (already in devDependencies)
 - **Windows**: Build on Windows or use a Windows VM/CI for `.exe`
 - **macOS**: Build on macOS for DMG (Intel and/or Apple Silicon)
+- **Platform-tools zips** at repo root (used by prebuild):
+  - `platform-tools-latest-windows.zip` (for Windows build)
+  - `platform-tools-latest-darwin.zip` (for macOS build)  
+  Download: [Android platform-tools](https://developer.android.com/tools/releases/platform-tools). The build runs `npm run prebuild` (or `prebuild:win` / `prebuild:mac`) to extract adb/fastboot into `electron/resources/adb/` so the app works without system ADB.
 
 ---
 

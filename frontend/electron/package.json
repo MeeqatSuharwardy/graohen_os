@@ -54,6 +54,11 @@
         "from": "../assets",
         "to": "assets",
         "filter": ["**/*"]
+      },
+      {
+        "from": "resources/adb",
+        "to": "adb",
+        "filter": ["**/*"]
       }
     ],
     "win": {
@@ -76,14 +81,11 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerIcon": "../assets/icon.png",
-      "uninstallerIcon": "../assets/icon.png",
       "artifactName": "${productName} Setup ${version}.${ext}",
       "shortcutName": "FlashDash"
     },
     "mac": {
       "target": "dmg",
-      "arch": ["x64", "arm64"],
       "icon": "../assets/icon.icns",
       "category": "public.app-category.utilities"
     },

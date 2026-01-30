@@ -12,6 +12,7 @@
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const os = require('os');
 const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
@@ -175,14 +176,30 @@ function createWindow() {
   });
 }
 
+// Cached paths for adb/fastboot so we resolve once and reuse (packaged apps often have minimal PATH)
+let cachedAdbPath = null;
+let cachedFastbootPath = null;
+
 /**
- * Execute adb command and return parsed output
- * @param {string} command - adb command to execute
+ * Execute adb or fastboot command using resolved executable path.
+ * In packaged macOS/Windows apps the shell PATH often does not include platform-tools,
+ * so we resolve adb/fastboot via findAdbPath/findFastbootPath and run with full path.
+ * @param {string} command - Full command string, e.g. "adb devices -l" or "fastboot devices"
  * @returns {Promise<string>} - Command output
  */
 async function executeAdbCommand(command) {
+  const trimmed = command.trim();
+  let fullCommand = command;
+  if (trimmed.startsWith('adb ')) {
+    const adbPath = await getAdbPath();
+    fullCommand = (adbPath.includes(' ') ? '"' + adbPath.replace(/"/g, '\\"') + '"' : adbPath) + trimmed.slice(3);
+  } else if (trimmed.startsWith('fastboot ')) {
+    const fastbootPath = await getFastbootPath();
+    fullCommand = (fastbootPath.includes(' ') ? '"' + fastbootPath.replace(/"/g, '\\"') + '"' : fastbootPath) + trimmed.slice(8);
+  }
+
   try {
-    const { stdout, stderr } = await execAsync(command, {
+    const { stdout, stderr } = await execAsync(fullCommand, {
       timeout: 10000, // 10 second timeout
       maxBuffer: 1024 * 1024, // 1MB buffer
     });
@@ -196,6 +213,18 @@ async function executeAdbCommand(command) {
   } catch (error) {
     throw new Error(`adb command failed: ${error.message}`);
   }
+}
+
+async function getAdbPath() {
+  if (cachedAdbPath) return cachedAdbPath;
+  cachedAdbPath = await findAdbPath();
+  return cachedAdbPath;
+}
+
+async function getFastbootPath() {
+  if (cachedFastbootPath) return cachedFastbootPath;
+  cachedFastbootPath = await findFastbootPath();
+  return cachedFastbootPath;
 }
 
 /**
@@ -783,7 +812,7 @@ async function downloadBundleToLocal(codename, version, downloadUrl, progressCal
       try {
         const st = await fs.stat(zipPath);
         zipSize = st.size || 0;
-      } catch (_) {}
+      } catch (_) { }
 
       // Prefer system unzip on macOS (and when AdmZip unavailable) - more reliable for large bundles (1.5GB+)
       const useSystemUnzip = !AdmZip || isMac || zipSize > 400 * 1024 * 1024; // >400MB or Mac or no AdmZip
@@ -967,19 +996,36 @@ ipcMain.handle('get-local-bundles-path', async () => {
 });
 
 /**
+ * Bundled platform-tools path (resources/adb from Electron build).
+ * Used first so the app works in dev, after build, and on user machines with no system ADB.
+ */
+function getBundledFastbootPath() {
+  const isWindows = process.platform === 'win32';
+  const resourcesPath = process.resourcesPath || path.join(path.dirname(process.execPath), '..', 'resources');
+  return path.join(resourcesPath, 'adb', isWindows ? 'fastboot.exe' : 'fastboot');
+}
+
+/**
  * Find fastboot executable path
  */
 async function findFastbootPath() {
   const isWindows = process.platform === 'win32';
 
-  // Check USB tools directory first (for portable mode)
+  // 1. Bundled platform-tools (from prepare-platform-tools.js → resources/adb)
+  const bundledPath = getBundledFastbootPath();
+  if (fsSync.existsSync(bundledPath)) {
+    console.log('[Tools] Found Fastboot in bundled resources:', bundledPath);
+    return bundledPath;
+  }
+
+  // 2. USB tools directory (portable mode)
   const usbToolsPath = path.join(path.dirname(process.execPath), '..', 'tools', isWindows ? 'fastboot.exe' : 'fastboot');
   if (fsSync.existsSync(usbToolsPath)) {
     console.log('[Tools] Found Fastboot in USB tools directory:', usbToolsPath);
     return usbToolsPath;
   }
 
-  // Check relative to app directory (for portable builds)
+  // 3. Relative to app directory (portable builds)
   const relativeToolsPath = path.join(__dirname, '..', 'tools', isWindows ? 'fastboot.exe' : 'fastboot');
   if (fsSync.existsSync(relativeToolsPath)) {
     console.log('[Tools] Found Fastboot in relative tools directory:', relativeToolsPath);
@@ -998,7 +1044,8 @@ async function findFastbootPath() {
     // Continue to try common paths
   }
 
-  // Common paths to check
+  // Common paths to check (macOS packaged apps often have minimal PATH; use homedir and ANDROID_*)
+  const home = process.env.HOME || os.homedir();
   const commonPaths = isWindows
     ? [
       'fastboot.exe',
@@ -1010,8 +1057,10 @@ async function findFastbootPath() {
       'fastboot',
       '/usr/bin/fastboot',
       '/usr/local/bin/fastboot',
-      path.join(process.env.HOME || '', 'Android', 'Sdk', 'platform-tools', 'fastboot'),
-      path.join(process.env.HOME || '', 'Library', 'Android', 'sdk', 'platform-tools', 'fastboot')
+      path.join(home, 'Library', 'Android', 'sdk', 'platform-tools', 'fastboot'),
+      path.join(home, 'Android', 'Sdk', 'platform-tools', 'fastboot'),
+      ...(process.env.ANDROID_HOME ? [path.join(process.env.ANDROID_HOME, 'platform-tools', 'fastboot')] : []),
+      ...(process.env.ANDROID_SDK_ROOT ? [path.join(process.env.ANDROID_SDK_ROOT, 'platform-tools', 'fastboot')] : [])
     ];
 
   for (const fastbootPath of commonPaths) {
@@ -1024,19 +1073,35 @@ async function findFastbootPath() {
 }
 
 /**
+ * Bundled ADB path (resources/adb from Electron build).
+ */
+function getBundledAdbPath() {
+  const isWindows = process.platform === 'win32';
+  const resourcesPath = process.resourcesPath || path.join(path.dirname(process.execPath), '..', 'resources');
+  return path.join(resourcesPath, 'adb', isWindows ? 'adb.exe' : 'adb');
+}
+
+/**
  * Find ADB executable path
  */
 async function findAdbPath() {
   const isWindows = process.platform === 'win32';
 
-  // Check USB tools directory first (for portable mode)
+  // 1. Bundled platform-tools (from prepare-platform-tools.js → resources/adb)
+  const bundledPath = getBundledAdbPath();
+  if (fsSync.existsSync(bundledPath)) {
+    console.log('[Tools] Found ADB in bundled resources:', bundledPath);
+    return bundledPath;
+  }
+
+  // 2. USB tools directory (portable mode)
   const usbToolsPath = path.join(path.dirname(process.execPath), '..', 'tools', isWindows ? 'adb.exe' : 'adb');
   if (fsSync.existsSync(usbToolsPath)) {
     console.log('[Tools] Found ADB in USB tools directory:', usbToolsPath);
     return usbToolsPath;
   }
 
-  // Check relative to app directory (for portable builds)
+  // 3. Relative to app directory (portable builds)
   const relativeToolsPath = path.join(__dirname, '..', 'tools', isWindows ? 'adb.exe' : 'adb');
   if (fsSync.existsSync(relativeToolsPath)) {
     console.log('[Tools] Found ADB in relative tools directory:', relativeToolsPath);
@@ -1055,7 +1120,8 @@ async function findAdbPath() {
     // Continue to try common paths
   }
 
-  // Common paths to check
+  // Common paths to check (macOS packaged apps often have minimal PATH; use homedir and ANDROID_*)
+  const home = process.env.HOME || os.homedir();
   const commonPaths = isWindows
     ? [
       'adb.exe',
@@ -1067,8 +1133,10 @@ async function findAdbPath() {
       'adb',
       '/usr/bin/adb',
       '/usr/local/bin/adb',
-      path.join(process.env.HOME || '', 'Android', 'Sdk', 'platform-tools', 'adb'),
-      path.join(process.env.HOME || '', 'Library', 'Android', 'sdk', 'platform-tools', 'adb')
+      path.join(home, 'Library', 'Android', 'sdk', 'platform-tools', 'adb'),
+      path.join(home, 'Android', 'Sdk', 'platform-tools', 'adb'),
+      ...(process.env.ANDROID_HOME ? [path.join(process.env.ANDROID_HOME, 'platform-tools', 'adb')] : []),
+      ...(process.env.ANDROID_SDK_ROOT ? [path.join(process.env.ANDROID_SDK_ROOT, 'platform-tools', 'adb')] : [])
     ];
 
   for (const adbPath of commonPaths) {
@@ -1425,7 +1493,7 @@ ipcMain.handle('download-apk', async (event, apkFilename) => {
       const request = httpModule.get(downloadUrl, (response) => {
         if (response.statusCode !== 200) {
           file.close();
-          fsSync.unlink(localApkPath, () => {});
+          fsSync.unlink(localApkPath, () => { });
           reject(new Error(`Failed to download APK: HTTP ${response.statusCode}`));
           return;
         }
@@ -1439,12 +1507,12 @@ ipcMain.handle('download-apk', async (event, apkFilename) => {
 
       request.on('error', (err) => {
         file.close();
-        fsSync.unlink(localApkPath, () => {});
+        fsSync.unlink(localApkPath, () => { });
         reject(err);
       });
       file.on('error', (err) => {
         file.close();
-        fsSync.unlink(localApkPath, () => {});
+        fsSync.unlink(localApkPath, () => { });
         reject(err);
       });
     });
@@ -1480,7 +1548,7 @@ ipcMain.handle('install-apk', async (event, deviceSerial, apkFilename) => {
       await fs.access(localApkPath);
       apkExists = true;
       sendLog(`[APK] Using local file: ${localApkPath}`, 'info');
-    } catch (_) {}
+    } catch (_) { }
 
     if (!apkExists) {
       sendLog(`[APK] Downloading from server...`, 'info');
@@ -1492,7 +1560,7 @@ ipcMain.handle('install-apk', async (event, deviceSerial, apkFilename) => {
         const request = httpModule.get(downloadUrl, (response) => {
           if (response.statusCode !== 200) {
             file.close();
-            fsSync.unlink(localApkPath, () => {});
+            fsSync.unlink(localApkPath, () => { });
             reject(new Error(`Failed to download APK: HTTP ${response.statusCode}`));
             return;
           }
@@ -1506,12 +1574,12 @@ ipcMain.handle('install-apk', async (event, deviceSerial, apkFilename) => {
 
         request.on('error', (err) => {
           file.close();
-          fsSync.unlink(localApkPath, () => {});
+          fsSync.unlink(localApkPath, () => { });
           reject(err);
         });
         file.on('error', (err) => {
           file.close();
-          fsSync.unlink(localApkPath, () => {});
+          fsSync.unlink(localApkPath, () => { });
           reject(err);
         });
       });
