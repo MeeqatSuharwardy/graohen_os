@@ -124,6 +124,15 @@ class EmailListResponse(BaseModel):
     offset: int
 
 
+class EmailReplyRequest(BaseModel):
+    """Reply to an existing email"""
+    body: str = Field(..., min_length=1, description="Reply body content")
+    subject: Optional[str] = Field(None, max_length=500, description="Optional subject override (default: Re: <original>)")
+    passcode: Optional[str] = Field(None, min_length=4, max_length=128, description="Optional passcode for reply")
+    expires_in_hours: Optional[int] = Field(None, ge=1, le=8760, description="Expiration in hours (1-8760)")
+    self_destruct: bool = Field(False, description="Delete reply after first read")
+
+
 class DraftSaveRequest(BaseModel):
     """Draft save request"""
     to: List[EmailStr] = Field(..., min_items=1, description="Recipient email addresses")
@@ -678,6 +687,135 @@ async def get_email(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve email"
+        )
+
+
+@router.post("/{email_id}/reply", response_model=EmailSendResponse, status_code=status.HTTP_201_CREATED)
+async def reply_to_email(
+    email_id: str,
+    reply_data: EmailReplyRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Reply to an existing email.
+    
+    Loads the original email (you must be sender or recipient), then sends a new
+    encrypted email: if you are the recipient, reply goes to the original sender;
+    if you are the sender, reply goes to the original recipients.
+    Subject defaults to "Re: <original subject>".
+    """
+    try:
+        user_email = current_user.get("email")
+        service = get_email_service_mongodb()
+        security = get_security_service()
+        client_ip = request.client.host if request.client else "unknown"
+
+        # Load original email (decrypt to get sender/recipients and subject)
+        email_body_bytes, metadata = await service.decrypt_email_for_authenticated_user(
+            access_token=email_id,
+            user_email=user_email,
+            return_metadata=True,
+        )
+        sender_email_orig = (metadata.get("sender_email") or "").strip().lower()
+        recipient_emails_orig = [e.lower() for e in (metadata.get("recipient_emails") or [])]
+        original_subject = (metadata.get("subject") or "").strip() or "No subject"
+
+        # Reply-to: if current user is recipient -> reply to sender; else reply to recipients
+        if user_email.lower() == sender_email_orig:
+            reply_to_emails = recipient_emails_orig
+        else:
+            reply_to_emails = [sender_email_orig] if sender_email_orig else recipient_emails_orig
+
+        if not reply_to_emails:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot determine reply recipient"
+            )
+
+        # Subject: optional override or "Re: <original>"
+        reply_subject = reply_data.subject
+        if not reply_subject:
+            reply_subject = f"Re: {original_subject}" if not original_subject.startswith("Re: ") else original_subject
+
+        # Security checks (same as send)
+        await check_email_rate_limit(user_email)
+        validate_email_recipients(reply_to_emails)
+        await EmailSecurityMiddleware.check_abuse_patterns(user_email, reply_to_emails)
+
+        email_body_content = reply_data.body
+        if reply_subject:
+            email_body_content = f"Subject: {reply_subject}\n\n{reply_data.body}"
+        email_body_bytes_new = email_body_content.encode("utf-8")
+
+        result = await service.encrypt_and_store_email(
+            email_body=email_body_bytes_new,
+            sender_email=user_email,
+            recipient_emails=reply_to_emails,
+            user_email=user_email,
+            passcode=reply_data.passcode,
+            expires_in_hours=reply_data.expires_in_hours,
+            subject=reply_subject,
+            self_destruct=reply_data.self_destruct,
+        )
+
+        await security.log_security_event(
+            SecurityEvent.EMAIL_SENT,
+            identifier=user_email,
+            user_id=current_user.get("id"),
+            ip_address=client_ip,
+            action="email_reply",
+            metadata={
+                "email_id": result["access_token"][:8] + "...",
+                "reply_to_id": email_id[:8] + "...",
+                "recipients_count": len(reply_to_emails),
+            },
+            success=True,
+        )
+        await EmailSecurityMiddleware.log_email_send(
+            user_email=user_email,
+            recipients=reply_to_emails,
+            email_id=result["access_token"],
+            success=True,
+        )
+        logger.info(f"Reply sent: id={result['access_token'][:8]}..., to={reply_to_emails}")
+
+        return EmailSendResponse(
+            email_id=result["access_token"],
+            email_address=result["email_address"],
+            secure_link=result["secure_link"],
+            expires_at=result.get("expires_at"),
+            encryption_mode=result["encryption_mode"],
+        )
+    except EmailEncryptionError as e:
+        error_msg = str(e).lower()
+        if "passcode" in error_msg or "unlock" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Original email requires passcode. Unlock it first or reply from the link."
+            )
+        if "not found" in error_msg or "expired" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Email not found or expired"
+            )
+        if "access denied" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not allowed to reply to this email"
+            )
+        logger.error(f"Reply failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send reply"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Reply failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send reply"
         )
 
 

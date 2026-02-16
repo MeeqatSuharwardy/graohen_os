@@ -3,6 +3,7 @@
 This service handles encrypted email storage in MongoDB with multi-layer encryption.
 """
 
+import asyncio
 import secrets
 import hashlib
 import base64
@@ -40,6 +41,26 @@ EXTERNAL_BASE_URL = settings.EXTERNAL_HTTPS_BASE_URL
 # Public access token settings
 ACCESS_TOKEN_SIZE = 32  # bytes
 ACCESS_TOKEN_EXPIRE_HOURS = 168  # 7 days default
+
+
+async def _send_notifications_background(
+    recipient_emails: List[str],
+    email_address: str,
+    secure_link: str,
+    sender_email: str,
+) -> None:
+    """Send notification emails in background so the send/reply API returns immediately."""
+    sender = get_email_sender()
+    for recipient in recipient_emails:
+        try:
+            await sender.send_encrypted_email_notification(
+                recipient_email=recipient,
+                email_address=email_address,
+                secure_link=secure_link,
+                sender_email=sender_email,
+            )
+        except Exception as e:
+            logger.warning(f"Background notification failed for {recipient}: {e}")
 
 
 class EncryptionMode(str, Enum):
@@ -195,18 +216,15 @@ class EmailServiceMongoDB:
             # Generate secure link
             secure_link = f"{EXTERNAL_BASE_URL}/email/{access_token}"
             
-            # Send notification emails to recipients
-            for recipient in recipient_emails:
-                try:
-                    await self.email_sender.send_encrypted_email_notification(
-                        recipient_email=recipient,
-                        email_address=email_address,
-                        secure_link=secure_link,
-                        sender_email=sender_email,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to send notification to {recipient}: {e}")
-                    # Continue even if notification fails
+            # Send notification emails in background so API returns fast
+            asyncio.create_task(
+                _send_notifications_background(
+                    recipient_emails=list(recipient_emails),
+                    email_address=email_address,
+                    secure_link=secure_link,
+                    sender_email=sender_email,
+                )
+            )
             
             logger.info(f"Email stored in MongoDB: {email_id[:8]}...")
             
@@ -780,21 +798,18 @@ class EmailServiceMongoDB:
                 {"$set": update_data}
             )
             
-            # Send notification emails
-            recipient_emails = draft.get("recipient_emails", [])
+            # Send notification emails in background for faster response
+            recipient_emails_list = draft.get("recipient_emails", [])
             email_address = draft.get("email_address")
             secure_link = f"{EXTERNAL_BASE_URL}/email/{draft_id}"
-            
-            for recipient in recipient_emails:
-                try:
-                    await self.email_sender.send_encrypted_email_notification(
-                        recipient_email=recipient,
-                        email_address=email_address,
-                        secure_link=secure_link,
-                        sender_email=sender_email,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to send notification to {recipient}: {e}")
+            asyncio.create_task(
+                _send_notifications_background(
+                    recipient_emails=list(recipient_emails_list),
+                    email_address=email_address,
+                    secure_link=secure_link,
+                    sender_email=sender_email,
+                )
+            )
             
             logger.info(f"Draft sent: {draft_id[:8]}...")
             
