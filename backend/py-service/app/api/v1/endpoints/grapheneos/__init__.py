@@ -1,2 +1,0 @@
-"""GrapheneOS API endpoints"""
-
