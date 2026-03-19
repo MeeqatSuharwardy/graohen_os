@@ -16,16 +16,20 @@ ENV/
 env/
 bundles/
 Archive/
+
+# Deployment docs - may contain env examples
 VPS_BACKEND_DOMAIN_SETUP.md
 
 # Build outputs
 
 *.egg-info/
 
-# Environment
+# Environment - never commit credentials or examples
 .env
 .env.example
-.env.local
+.env*.example
+**/env.example
+**/.env.example
 .env.*.local
 ca-certificates.crt
 # IDE
