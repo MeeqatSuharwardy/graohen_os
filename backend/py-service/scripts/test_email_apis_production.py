@@ -115,6 +115,7 @@ def test_email_apis(access_token: str, user_email: str, other_email: str):
         print_error(f"Drafts API exception: {str(e)}")
     
     # Test 4: Send Email
+    sent_email_id = None
     print("\n✉️  Test 4: POST /email/send")
     print("-"*70)
     try:
@@ -132,13 +133,71 @@ def test_email_apis(access_token: str, user_email: str, other_email: str):
         print_info(f"Status: {response.status_code}")
         if response.status_code in [200, 201]:
             data = response.json()
+            sent_email_id = data.get("email_id")
             print_success(f"Send Email API: Email sent successfully")
-            print_info(f"   Email ID: {data.get('email_id', 'N/A')[:30]}...")
+            print_info(f"   Email ID: {sent_email_id[:30] if sent_email_id else 'N/A'}...")
             print_info(f"   Email Address: {data.get('email_address', 'N/A')}")
         else:
             print_error(f"Send Email API failed: {response.text[:300]}")
     except Exception as e:
         print_error(f"Send Email API exception: {str(e)}")
+    
+    # Test 4b: Get single email (if we have an id from inbox/sent)
+    print("\n📧 Test 4b: GET /email/{email_id}")
+    print("-"*70)
+    try:
+        list_resp = requests.get(f"{BASE_URL}/email/inbox?limit=1", headers=headers, timeout=15)
+        if list_resp.status_code == 200:
+            emails = list_resp.json().get("emails", [])
+            if emails:
+                eid = emails[0].get("email_id")
+                resp = requests.get(f"{BASE_URL}/email/{eid}", headers=headers, timeout=15)
+                print_info(f"Status: {resp.status_code}")
+                if resp.status_code == 200:
+                    d = resp.json()
+                    print_success(f"Get Email API: subject={d.get('subject', 'N/A')[:40]}")
+                else:
+                    print_error(f"Get Email failed: {resp.text[:200]}")
+            else:
+                print_warning("No inbox emails to fetch (skip get single email)")
+        else:
+            print_warning("Inbox failed, skip get single email")
+    except Exception as e:
+        print_error(f"Get Email API exception: {str(e)}")
+    
+    # Test 4c: Reply to email (use sent email id if we have it, else first from inbox)
+    print("\n↩️  Test 4c: POST /email/{email_id}/reply")
+    print("-"*70)
+    reply_to_id = sent_email_id
+    if not reply_to_id:
+        try:
+            list_resp = requests.get(f"{BASE_URL}/email/inbox?limit=1", headers=headers, timeout=15)
+            if list_resp.status_code == 200:
+                emails = list_resp.json().get("emails", [])
+                if emails:
+                    reply_to_id = emails[0].get("email_id")
+        except Exception:
+            pass
+    if reply_to_id:
+        try:
+            reply_data = {"body": f"Reply from {user_email} via API test."}
+            response = requests.post(
+                f"{BASE_URL}/email/{reply_to_id}/reply",
+                json=reply_data,
+                headers={**headers, "Content-Type": "application/json"},
+                timeout=20
+            )
+            print_info(f"Status: {response.status_code}")
+            if response.status_code in [200, 201]:
+                data = response.json()
+                print_success(f"Reply API: Reply sent successfully")
+                print_info(f"   New Email ID: {data.get('email_id', 'N/A')[:30]}...")
+            else:
+                print_error(f"Reply API failed: {response.text[:300]}")
+        except Exception as e:
+            print_error(f"Reply API exception: {str(e)}")
+    else:
+        print_warning("No email_id available to reply to (need at least one inbox or sent email)")
     
     # Test 5: Save Draft
     print("\n💾 Test 5: POST /email/drafts")

@@ -11,6 +11,7 @@ Complete API reference for building mobile applications with end-to-end encrypti
 - [Email API](#email-api)
   - [Send Encrypted Email](#send-encrypted-email)
   - [Get Email](#get-email-authenticated-users)
+  - [Reply to Email](#reply-to-email)
   - [Get Inbox Emails](#get-inbox-emails)
   - [Get Sent Emails](#get-sent-emails)
   - [Get Draft Emails](#get-draft-emails)
@@ -19,6 +20,11 @@ Complete API reference for building mobile applications with end-to-end encrypti
   - [Delete Draft Email](#delete-draft-email)
   - [Unlock Passcode-Protected Email](#unlock-passcode-protected-email)
   - [Delete Email](#delete-email)
+- [APK API](#apk-api)
+  - [Get All APKs](#get-all-apks)
+  - [Download APK](#download-apk)
+  - [Upload APK](#upload-apk)
+  - [Install APK on Device](#install-apk-on-device)
 - [Drive API](#drive-api)
   - [📘 Complete Drive API Guide](./DRIVE_API_GUIDE.md) - Detailed guide for implementing file storage (like Google Drive)
 - [Messaging API](#messaging-api)
@@ -713,6 +719,93 @@ const unlockEmail = async (emailId, passcode) => {
 };
 ```
 
+### Reply to Email
+
+Reply to an existing email. You must be the sender or a recipient of the original email. If you are the **recipient**, the reply is sent to the original **sender**. If you are the **sender**, the reply is sent to the original **recipients**. Subject defaults to `Re: <original subject>`.
+
+**Endpoint:** `POST /api/v1/email/{email_id}/reply`
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+**Request:**
+```json
+{
+  "body": "Your reply message here.",
+  "subject": "Optional subject override",
+  "passcode": "optional-passcode",
+  "expires_in_hours": 24,
+  "self_destruct": false
+}
+```
+
+**Request Fields:**
+- `body` (required): Reply body content
+- `subject` (optional): Override subject; if omitted, uses `Re: <original subject>`
+- `passcode` (optional): Passcode protection for the reply (min 4 chars)
+- `expires_in_hours` (optional): Expiration in hours (1–8760)
+- `self_destruct` (optional): Delete reply after first read (default: false)
+
+**Response:** Same shape as Send Email (201 Created)
+```json
+{
+  "email_id": "VzL6WwXAUQYA4fjTvho4ez129wO1Ws_i6AJJkivYH0I",
+  "email_address": "VzL6WwXAUQYA4fjTvho4ez129wO1Ws_i6AJJkivYH0I@fxmail.ai",
+  "secure_link": "https://freedomos.vulcantech.co/email/VzL6WwXAUQYA4fjTvho4ez129wO1Ws_i6AJJkivYH0I",
+  "expires_at": null,
+  "encryption_mode": "authenticated"
+}
+```
+
+**Errors:**
+- `403` – Original email requires passcode (unlock it first) or you are not sender/recipient
+- `404` – Email not found or expired
+
+**Example (mobile):**
+```javascript
+const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1';
+
+const replyToEmail = async (emailId, body, accessToken, options = {}) => {
+  const response = await fetch(
+    `${API_BASE_URL}/email/${emailId}/reply`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        body,
+        subject: options.subject,
+        passcode: options.passcode,
+        expires_in_hours: options.expires_in_hours,
+        self_destruct: options.self_destruct ?? false,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    if (response.status === 403) throw new Error(error.detail || 'Cannot reply to this email');
+    if (response.status === 404) throw new Error('Email not found or expired');
+    throw new Error(error.detail || 'Failed to send reply');
+  }
+
+  return await response.json();
+};
+
+// Usage: reply to email (e.g. from inbox/sent view)
+const result = await replyToEmail(
+  'aNZNWee3Yb8Hzh32hoDQpn_Sffn3VwoGE3xbNrcrSQ8',
+  'Thanks, here is my reply.',
+  accessToken
+);
+console.log(result.secure_link); // share with recipient
+```
+
 ### Get Email by Token (Public Access)
 
 Access an email using its token (for web viewer or public access).
@@ -1136,6 +1229,145 @@ Authorization: Bearer {access_token}
   "message": "Email deleted successfully"
 }
 ```
+
+---
+
+## APK API
+
+APK endpoints are under the **APK base URL** (not under `/api/v1`). Use them to list, download, upload, and install APK files (e.g. for device flashing or app distribution).
+
+**APK Base URL:**
+```
+https://freedomos.vulcantech.co/apks
+```
+
+**Authentication:** Get All APKs and Download are **public** (no Bearer token). Upload, Update, and Delete require HTTP Basic auth (password set on server).
+
+---
+
+### Get All APKs
+
+Returns a list of all uploaded APK files with filename, size, and upload time. Use this on the mobile app to show available APKs and then download by filename.
+
+**Endpoint:** `GET /apks/list`
+
+**Full URL:** `https://freedomos.vulcantech.co/apks/list`
+
+**Headers:** None required.
+
+**Response:** Array of APK info (newest first)
+```json
+[
+  {
+    "filename": "my-app.apk",
+    "size": 15728640,
+    "upload_time": "2026-02-16T17:04:30.575000"
+  },
+  {
+    "filename": "other-app.apk",
+    "size": 8388608,
+    "upload_time": "2026-01-29T12:00:00.000000"
+  }
+]
+```
+
+**Example (mobile):**
+```javascript
+const APK_BASE_URL = 'https://freedomos.vulcantech.co/apks';
+
+const getAllApks = async () => {
+  const response = await fetch(`${APK_BASE_URL}/list`);
+  if (!response.ok) throw new Error('Failed to fetch APK list');
+  return await response.json();
+};
+
+// Usage: show list and download
+const apks = await getAllApks();
+apks.forEach(apk => {
+  console.log(apk.filename, (apk.size / 1024 / 1024).toFixed(2) + ' MB', apk.upload_time);
+});
+```
+
+---
+
+### Download APK
+
+Download an APK file by filename. Use the filename from **Get All APKs**.
+
+**Endpoint:** `GET /apks/download/{filename}`
+
+**Full URL:** `https://freedomos.vulcantech.co/apks/download/{filename}`
+
+**Example:** `GET https://freedomos.vulcantech.co/apks/download/my-app.apk`
+
+**Response:** Binary file (`application/vnd.android.package-archive`) with `Content-Disposition: attachment; filename="{filename}"`.
+
+**Example (mobile):**
+```javascript
+const APK_BASE_URL = 'https://freedomos.vulcantech.co/apks';
+
+const downloadApk = async (filename) => {
+  const url = `${APK_BASE_URL}/download/${encodeURIComponent(filename)}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    if (response.status === 404) throw new Error('APK not found');
+    throw new Error('Download failed');
+  }
+  return await response.blob(); // or response.arrayBuffer() for file save
+};
+
+// Usage: download and save (e.g. React Native)
+const blob = await downloadApk('my-app.apk');
+// Then save blob to device storage or open installer
+```
+
+---
+
+### Upload APK
+
+Upload an APK file. Requires HTTP Basic authentication (username/password configured on server). Typically used from admin/web, not from the mobile app.
+
+**Endpoint:** `POST /apks/upload`
+
+**Content-Type:** `multipart/form-data`
+
+**Form fields:**
+- `file` (required): APK file
+- `username`: Basic auth username
+- `password`: Basic auth password
+
+**Response:** HTML success page or `401` if password invalid.
+
+---
+
+### Install APK on Device
+
+Trigger installation of an APK on a connected device via ADB. Requires the device to be connected and the backend to have ADB access. Used by desktop/Electron installers.
+
+**Endpoint:** `POST /apks/install`
+
+**Headers:** `Content-Type: application/json`
+
+**Request:**
+```json
+{
+  "device_serial": "ABC123",
+  "apk_filename": "my-app.apk"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "my-app.apk installed successfully",
+  "device_serial": "ABC123"
+}
+```
+
+**Other endpoints (for completeness):**
+- `DELETE /apks/{filename}` – Delete an APK (requires Basic auth).
+- `PUT /apks/{filename}` – Replace an APK file (requires Basic auth + multipart file).
 
 ---
 
@@ -2465,6 +2697,8 @@ const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1';
 
 2. **Email Features**
    - Send emails with `/email/send` (server encrypts automatically)
+   - **Reply to email** with `POST /email/{email_id}/reply` (body: `{ "body": "..." }`)
+   - Get single email with `GET /email/{email_id}`
    - Get inbox emails with `/email/inbox` (received emails)
    - Get sent emails with `/email/sent` (emails you sent)
    - Get draft emails with `/email/drafts` (saved drafts)
@@ -2475,13 +2709,18 @@ const API_BASE_URL = 'https://freedomos.vulcantech.co/api/v1';
    - Server never sees plaintext email content
    - Pagination support for inbox/sent/drafts (limit/offset)
 
-3. **Drive Features**
+3. **APK Features** (base URL: `https://freedomos.vulcantech.co/apks`, no auth for list/download)
+   - **Get all APKs:** `GET /apks/list` → array of `{ filename, size, upload_time }`
+   - **Download APK:** `GET /apks/download/{filename}` → binary file
+   - Upload/install/delete require server Basic auth (admin use)
+
+4. **Drive Features**
    - Upload files with `/drive/upload` (server encrypts)
    - Or use `/drive/upload-encrypted` for client-side encryption
    - Check quota with `/drive/storage/quota` (5GB per user)
    - Files stored in MongoDB with 3-layer encryption
 
-4. **Messaging Features**
+5. **Messaging Features**
    - Send messages with `/messaging/send` (client-side encryption required)
    - Messages stored encrypted in MongoDB
    - Only recipients can decrypt
