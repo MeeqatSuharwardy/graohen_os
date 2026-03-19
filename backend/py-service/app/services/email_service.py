@@ -28,6 +28,7 @@ from app.core.key_manager import (
     generate_salt_for_identifier,
     get_key_manager,
 )
+from app.core.secure_derivation import derive_user_key_complex
 from app.core.redis_client import get_redis
 from app.config import settings
 import logging
@@ -126,8 +127,10 @@ class EmailService:
                     # Generate random salt if no user email
                     salt = self.key_manager.generate_salt()
                 
-                # Derive key from passcode
-                passcode_key = derive_key_from_passcode(passcode, salt)
+                # Derive key: Argon2id base + complex chain (same as drive/auth)
+                base_key = derive_key_from_passcode(passcode, salt)
+                ctx = salt + (user_email.encode() if user_email else b"passcode")
+                passcode_key = derive_user_key_complex(base_key, ctx)
                 
                 # Encrypt content key with passcode-derived key
                 encrypted_content_key = encrypt_bytes(content_key, passcode_key)
@@ -139,13 +142,10 @@ class EmailService:
                 
             elif user_email:
                 encryption_mode = EncryptionMode.AUTHENTICATED
-                # Derive user key from email (using email as identifier)
+                # Derive user key: Argon2id base + complex chain (same as drive)
                 user_salt = generate_salt_for_identifier(user_email)
-                # For authenticated mode, we use a default passcode or user-specific key
-                # In a real system, you'd retrieve the user's master key
-                # For now, we'll use a derivation based on email
-                # TODO: Replace with actual user key retrieval
-                user_key = derive_key_from_passcode(user_email, user_salt)  # Temporary
+                base_key = derive_key_from_passcode(user_email, user_salt)
+                user_key = derive_user_key_complex(base_key, user_salt + user_email.encode())
                 
                 # Encrypt content key with user key
                 encrypted_content_key = encrypt_bytes(content_key, user_key)
@@ -262,10 +262,10 @@ class EmailService:
             encrypted_content = encrypted_data["encrypted_content"]
             encrypted_content_key = encrypted_data["encrypted_content_key"]
             
-            # Derive user key (same as encryption)
+            # Derive user key (same as encryption - complex chain)
             user_salt = generate_salt_for_identifier(user_email)
-            # TODO: Replace with actual user key retrieval
-            user_key = derive_key_from_passcode(user_email, user_salt)  # Temporary
+            base_key = derive_key_from_passcode(user_email, user_salt)
+            user_key = derive_user_key_complex(base_key, user_salt + user_email.encode())
             
             # Decrypt content key
             try:
@@ -348,8 +348,10 @@ class EmailService:
                     raise EmailEncryptionError("Passcode salt not found")
                 salt = base64.b64decode(salt_base64)
             
-            # Derive key from passcode
-            passcode_key = derive_key_from_passcode(passcode, salt)
+            # Derive key (same as encryption - complex chain)
+            base_key = derive_key_from_passcode(passcode, salt)
+            ctx = salt + (user_email.encode() if user_email else b"passcode")
+            passcode_key = derive_user_key_complex(base_key, ctx)
             
             # Decrypt content key
             try:

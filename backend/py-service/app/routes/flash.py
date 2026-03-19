@@ -28,18 +28,6 @@ class UnlockAndFlashRequest(BaseModel):
     device_serial: str
     bundle_path: Optional[str] = None
     skip_unlock: bool = False
-    codename: Optional[str] = None  # Device codename from frontend
-    bootloader_unlocked: Optional[bool] = None  # Bootloader state from frontend
-
-
-class DeviceFlashRequest(BaseModel):
-    """Request to start flash from frontend-detected device"""
-    serial: str
-    codename: str
-    state: str  # 'device' or 'fastboot'
-    bootloader_unlocked: Optional[bool] = None
-    version: Optional[str] = None  # Bundle version, defaults to latest
-    skip_unlock: Optional[bool] = None  # Auto-determined from bootloader_unlocked if not provided
 
 
 @router.post("/execute")
@@ -188,60 +176,6 @@ async def cancel_flash_job_endpoint(job_id: str):
     return {"success": True, "message": "Job cancelled"}
 
 
-@router.post("/device-flash")
-async def device_flash(request: DeviceFlashRequest):
-    """
-    Start flash process from frontend-detected device.
-    Frontend sends device info (detected via WebADB) and backend starts flashing.
-    
-    This is the main endpoint for web flasher - frontend detects device locally
-    and tells backend to start flash process.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        logger.info(f"Device flash request: {request.serial} ({request.codename}) in {request.state} mode")
-        
-        # Determine skip_unlock
-        skip_unlock = request.skip_unlock
-        if skip_unlock is None:
-            # Auto-determine from bootloader_unlocked flag
-            skip_unlock = request.bootloader_unlocked is True
-        
-        if skip_unlock:
-            logger.info(f"Device {request.serial} bootloader already unlocked, skipping unlock step")
-        
-        # Find bundle for codename
-        bundle = get_bundle_for_codename(request.codename, version=request.version)
-        if not bundle:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No bundle found for device codename: {request.codename}. "
-                       f"Please download a bundle first."
-            )
-        
-        bundle_path = bundle["path"]
-        
-        # Call unlock-and-flash endpoint with device info
-        unlock_flash_request = UnlockAndFlashRequest(
-            device_serial=request.serial,
-            bundle_path=bundle_path,
-            skip_unlock=skip_unlock,
-            codename=request.codename,
-            bootloader_unlocked=request.bootloader_unlocked,
-        )
-        
-        # Use the existing unlock_and_flash logic
-        return await unlock_and_flash(unlock_flash_request)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in device_flash: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to start device flash: {str(e)}")
-
-
 @router.post("/unlock-and-flash")
 async def unlock_and_flash(request: UnlockAndFlashRequest):
     """
@@ -252,24 +186,18 @@ async def unlock_and_flash(request: UnlockAndFlashRequest):
     3. Flash GrapheneOS
     4. Reboot device
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     try:
-        # Use codename from request if provided (from frontend), otherwise try to identify
-        codename = request.codename
-        
         # Find bundle path if not provided
         bundle_path = request.bundle_path
         
         if not bundle_path:
-            # Try to identify device to get codename if not provided
-            if not codename:
-                device_info = identify_device(request.device_serial)
-                if device_info:
-                    codename = device_info["codename"]
+            # Try to identify device to get codename
+            device_info = identify_device(request.device_serial)
             
-            if codename:
+            if device_info:
+                # Device identified successfully - use its codename
+                codename = device_info["codename"]
+                
                 # Find the latest bundle for this codename
                 bundle = get_bundle_for_codename(codename)
                 if bundle:
@@ -286,7 +214,7 @@ async def unlock_and_flash(request: UnlockAndFlashRequest):
                     else:
                         raise HTTPException(
                             status_code=404,
-                            detail=f"Device codename {codename} but no bundle found. "
+                            detail=f"Device identified as {codename} but no bundle found. "
                                    f"Please download a bundle first or specify bundle_path."
                         )
             else:
@@ -375,17 +303,11 @@ async def unlock_and_flash(request: UnlockAndFlashRequest):
         
         flash_jobs[job_id] = job
         
-        # Use skip_unlock from request, or determine from bootloader_unlocked flag
-        skip_unlock = request.skip_unlock
-        if request.bootloader_unlocked is True:
-            skip_unlock = True
-            logger.info(f"Device {request.device_serial} bootloader already unlocked (from frontend), skipping unlock")
-        
         # Start the unlock and flash process in background
         import threading
         thread = threading.Thread(
             target=_run_unlock_and_flash,
-            args=(job, flasher_script, extracted_dir, request.device_serial, skip_unlock)
+            args=(job, flasher_script, extracted_dir, request.device_serial, request.skip_unlock)
         )
         thread.daemon = True
         thread.start()
@@ -686,3 +608,28 @@ def _process_flasher_output(job: dict, line: str, job_id: str):
             job["logs"].append(line)
         if job_id:
             flash_jobs[job_id] = job
+        
+        # Check final status
+        if return_code != 0:
+            job["status"] = "failed"
+            if not any("failed" in log.lower() or "error" in log.lower() for log in job["logs"]):
+                job["logs"].append(f"✗ Process exited with error code: {return_code}")
+        elif job["status"] != "failed" and job["status"] != "completed":
+            # Process completed successfully but status wasn't set
+            job["status"] = "completed"
+            if not any("completed successfully" in log.lower() for log in job["logs"]):
+                job["logs"].append("✓ Unlock and flash completed successfully!")
+            
+    except Exception as e:
+        job["status"] = "failed"
+        error_msg = f"ERROR: {str(e)}"
+        job["logs"].append(error_msg)
+        import traceback
+        job["logs"].append(f"Traceback: {traceback.format_exc()}")
+    finally:
+        if job.get("process"):
+            job["process"] = None
+        # Ensure job persists with final state
+        if job_id:
+            flash_jobs[job_id] = job
+

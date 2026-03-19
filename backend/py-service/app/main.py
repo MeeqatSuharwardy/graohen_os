@@ -41,7 +41,10 @@ except ImportError:
 
 # Import security middleware (if available)
 try:
-    from app.middleware.security import RateLimitMiddleware, SecurityHeadersMiddleware
+    from app.middleware.security import (
+        RateLimitMiddleware,
+        SecurityHeadersMiddleware,
+    )
     HAS_SECURITY = True
 except ImportError:
     HAS_SECURITY = False
@@ -115,16 +118,15 @@ app = FastAPI(
 )
 
 # Security Middleware (if available)
-# Note: Rate limiting disabled for development - can be re-enabled in production if needed
 if HAS_SECURITY:
     app.add_middleware(SecurityHeadersMiddleware)
-    # Rate limiting disabled - uncomment if needed for production
-    # app.add_middleware(
-    #     RateLimitMiddleware,
-    #     max_requests=100,
-    #     window_seconds=3600,
-    #     exclude_paths=["/health", "/docs", "/openapi.json", "/redoc"],
-    # )
+    if settings.is_production:
+        app.add_middleware(
+            RateLimitMiddleware,
+            max_requests=200,
+            window_seconds=3600,
+            exclude_paths=["/", "/health", "/docs", "/openapi.json", "/redoc"],
+        )
 
 # CORS Middleware - Allow all origins including localhost for local development
 # Note: This allows all origins for development. For production, you may want to restrict this.

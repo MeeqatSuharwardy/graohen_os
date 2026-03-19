@@ -24,7 +24,21 @@ from app.core.security_hardening import (
     SecurityEvent,
     BruteForceError,
 )
+<<<<<<< HEAD
 from app.services.user_service_mongodb import get_user_service
+=======
+from app.core.secure_derivation import get_current_time_slot
+from app.services.device_key_service import (
+    create_device_seed_for_user,
+    get_device_seed,
+    user_has_any_device_seed,
+    encrypt_seed_for_device_download,
+    store_challenge,
+    get_and_consume_challenge,
+    verify_device_login_proof,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
+>>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -84,6 +98,37 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     device_id: Optional[str] = None
+    device_key_download: Optional[Dict[str, str]] = None  # Encrypted key - save to device
+
+
+class DeviceKeyDownloadRequest(BaseModel):
+    """Request device key download (requires password)"""
+    email: EmailStr
+    password: str
+    device_id: str = Field(..., min_length=8, max_length=255)
+
+
+class LoginChallengeRequest(BaseModel):
+    """Request login challenge"""
+    email: EmailStr
+    device_id: str = Field(..., min_length=8, max_length=255)
+
+
+class LoginChallengeResponse(BaseModel):
+    """Login challenge response"""
+    challenge: str
+    time_slot: int
+    expires_in_seconds: int = 120
+
+
+class LoginWithDeviceRequest(BaseModel):
+    """Login with device proof"""
+    email: EmailStr
+    password: str
+    device_id: str = Field(..., min_length=8, max_length=255)
+    challenge: str = Field(..., min_length=1)
+    proof: str = Field(..., min_length=1)
+    time_slot: Optional[int] = None  # Client's time slot for clock skew
 
 
 class RefreshTokenRequest(BaseModel):
@@ -324,12 +369,15 @@ async def register(
     """
     Register a new user.
     
-    Creates a new user account and returns access and refresh tokens.
+    Creates account and returns tokens + device_key_download.
+    Save device_key_download to device - required for future logins.
+    Key rotates every 2 min (server-synced), does not affect email/drive.
     """
     security = get_security_service()
     client_ip = request.client.host if request.client else "unknown"
     
     try:
+<<<<<<< HEAD
         # Rate limiting removed for testing/development
         # await security.check_rate_limit(
         #     identifier=client_ip,
@@ -337,16 +385,24 @@ async def register(
         #     window_seconds=3600,
         #     action="register",
         # )
+=======
+        await security.check_rate_limit(
+            identifier=client_ip,
+            max_requests=5,
+            window_seconds=3600,
+            action="register",
+        )
+>>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
         
-        # Create user
         user = await create_user(
             email=user_data.email,
             password=user_data.password,
             full_name=user_data.full_name,
         )
         
-        # Generate device ID if not provided
         device_id = user_data.device_id or generate_token_jti()
+        if len(device_id) < 8:
+            device_id = generate_token_jti()
         
         # Generate token JTI for revocation tracking
         access_jti = generate_token_jti()
@@ -375,7 +431,6 @@ async def register(
             }
         )
         
-        # Store refresh token metadata in Redis
         await store_refresh_token(
             refresh_token=refresh_token,
             user_id=user["id"],
@@ -383,14 +438,18 @@ async def register(
             expires_in=refresh_token_expires,
         )
         
-        # Log registration event
+        # Create device-bound encryption key (2-min rotation, 256-bit, Argon2id)
+        device_seed = await create_device_seed_for_user(user["id"], device_id)
+        device_key_blob = encrypt_seed_for_device_download(device_seed, user_data.password)
+        device_seed = b"\x00" * len(device_seed)
+        
         await security.log_security_event(
-            SecurityEvent.LOGIN_SUCCESS,  # Using available event
+            SecurityEvent.LOGIN_SUCCESS,
             identifier=user_data.email,
             user_id=user["id"],
             ip_address=client_ip,
             action="register",
-            metadata={"device_id": user_data.device_id},
+            metadata={"device_id": device_id},
             success=True,
         )
         
@@ -401,6 +460,7 @@ async def register(
             refresh_token=refresh_token,
             expires_in=int(access_token_expires.total_seconds()),
             device_id=device_id,
+            device_key_download=device_key_blob,
         )
         
     except HTTPException:
@@ -413,12 +473,52 @@ async def register(
         )
 
 
+@router.post("/device-key/download")
+async def download_device_key(
+    data: DeviceKeyDownloadRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Download encrypted device key. Save to device - required for login.
+    For existing users who don't have device key yet.
+    """
+    user = await get_user_by_email(data.email, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    if not verify_password(data.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    
+    seed = await get_device_seed(user["id"], data.device_id)
+    if not seed:
+        seed = await create_device_seed_for_user(user["id"], data.device_id)
+    blob = encrypt_seed_for_device_download(seed, data.password)
+    seed = b"\x00" * len(seed)
+    return {"device_key_download": blob, "device_id": data.device_id}
+
+
+@router.post("/login/challenge", response_model=LoginChallengeResponse)
+async def login_challenge(data: LoginChallengeRequest):
+    """
+    Get challenge for device-bound login. Call before login.
+    Challenge expires in 2 minutes.
+    """
+    challenge = secrets.token_urlsafe(32)
+    await store_challenge(data.email, data.device_id, challenge)
+    return LoginChallengeResponse(
+        challenge=challenge,
+        time_slot=get_current_time_slot(),
+        expires_in_seconds=120,
+    )
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
     credentials: UserLogin,
     request: Request,
 ):
     """
+<<<<<<< HEAD
     Login with email and password.
     
     Returns access and refresh tokens.
@@ -429,12 +529,62 @@ async def login(
     
     Note: Only the fingerprint/hash is stored, never the actual encryption key.
     The actual key remains on the device and is never transmitted to the server.
+=======
+    Login with email and password (legacy - no device proof).
+    Use /login/secure for device-bound login.
+>>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
     """
+    return await _do_login(
+        email=credentials.email,
+        password=credentials.password,
+        device_id=credentials.device_id,
+        challenge=None,
+        proof=None,
+        time_slot=None,
+        request=request,
+        db=db,
+    )
+
+
+@router.post("/login/secure", response_model=TokenResponse)
+async def login_secure(
+    data: LoginWithDeviceRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Login with device-bound proof. Requires device key (from register or download).
+    Key rotates every 2 min - device derives current key from stored seed.
+    """
+    return await _do_login(
+        email=data.email,
+        password=data.password,
+        device_id=data.device_id,
+        challenge=data.challenge,
+        proof=data.proof,
+        time_slot=data.time_slot,
+        request=request,
+        db=db,
+    )
+
+
+async def _do_login(
+    email: str,
+    password: str,
+    device_id: Optional[str],
+    challenge: Optional[str],
+    proof: Optional[str],
+    time_slot: Optional[int],
+    request: Request,
+    db: AsyncSession,
+) -> TokenResponse:
+    """Shared login logic."""
     security = get_security_service()
     client_ip = request.client.host if request.client else "unknown"
-    identifier = f"{credentials.email}:{client_ip}"
+    identifier = f"{email}:{client_ip}"
     
     try:
+<<<<<<< HEAD
         # Brute force protection removed for testing/development
         # try:
         #     await security.check_brute_force(
@@ -466,9 +616,36 @@ async def login(
             #     identifier=identifier,
             #     action="login",
             # )
+=======
+        try:
+            await security.check_brute_force(
+                identifier=identifier,
+                max_attempts=5,
+                window_seconds=3600,
+                lockout_seconds=3600,
+                action="login",
+            )
+        except BruteForceError as e:
+            await security.log_security_event(
+                SecurityEvent.BRUTE_FORCE_DETECTED,
+                identifier=email,
+                ip_address=client_ip,
+                action="login",
+                metadata={"reason": "too_many_attempts"},
+                success=False,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(e),
+            )
+        
+        user = await get_user_by_email(email, db)
+        if not user:
+            remaining = await security.record_failed_attempt(identifier=identifier, action="login")
+>>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
             await security.log_security_event(
                 SecurityEvent.LOGIN_FAILURE,
-                identifier=credentials.email,
+                identifier=email,
                 ip_address=client_ip,
                 action="login",
                 metadata={"reason": "user_not_found"},
@@ -480,6 +657,7 @@ async def login(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
+<<<<<<< HEAD
         # Verify password
         if not verify_password(credentials.password, user["hashed_password"]):
             # Failed attempt recording removed
@@ -487,9 +665,13 @@ async def login(
             #     identifier=identifier,
             #     action="login",
             # )
+=======
+        if not verify_password(password, user["hashed_password"]):
+            remaining = await security.record_failed_attempt(identifier=identifier, action="login")
+>>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
             await security.log_security_event(
                 SecurityEvent.LOGIN_FAILURE,
-                identifier=credentials.email,
+                identifier=email,
                 user_id=user["id"],
                 ip_address=client_ip,
                 action="login",
@@ -502,18 +684,49 @@ async def login(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
+<<<<<<< HEAD
         # Reset brute force counter removed
         # await security.reset_brute_force_counter(identifier, action="login")
+=======
+        # Device proof required if user has device seed (from register or download)
+        has_device_seed = await user_has_any_device_seed(user["id"])
+        if has_device_seed:
+            if not device_id or len(device_id) < 8:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="device_id required. Use the device_id from your device key.",
+                )
+            if not challenge or not proof:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Device-bound login required. 1) POST /auth/login/challenge 2) Derive key from device seed + time_slot 3) POST /auth/login/secure with proof=HMAC(key,challenge)",
+                )
+            stored_challenge = await get_and_consume_challenge(email, device_id)
+            if not stored_challenge or stored_challenge != challenge:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired challenge. Request new challenge.",
+                )
+            if not await verify_device_login_proof(user["id"], device_id, challenge, proof, time_slot):
+                remaining = await security.record_failed_attempt(identifier=identifier, action="login")
+                seed_for_device = await get_device_seed(user["id"], device_id)
+                detail = (
+                    "No device key for this device. Download at POST /auth/device-key/download"
+                    if seed_for_device is None
+                    else "Device verification failed. Key rotates every 2 min - sync time with server."
+                )
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
         
-        # Check if user is active
+        await security.reset_brute_force_counter(identifier, action="login")
+>>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
+        
         if not user.get("is_active", True):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is disabled",
             )
         
-        # Generate or use device ID
-        device_id = credentials.device_id or generate_token_jti()
+        device_id = device_id or generate_token_jti()
         
         # Generate token JTIs
         access_jti = generate_token_jti()

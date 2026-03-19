@@ -25,10 +25,14 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     ALLOWED_HOSTS: str = "localhost,127.0.0.1"
     
-    # Database
+    # Database (DigitalOcean Managed PostgreSQL)
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/fastapi_db",
+        default="postgresql+asyncpg://doadmin:AVNS_4JvwOl3UBWtVfQ5aTaF@db-postgresql-nyc3-46529-do-user-315641620.j.db.ondigitalocean.com:25060/defaultdb?sslmode=require",
         description="PostgreSQL database URL",
+    )
+    DATABASE_CA_CERT: str = Field(
+        default="ca-certificate.crt",
+        description="Path to CA certificate for SSL",
     )
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20

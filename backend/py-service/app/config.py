@@ -29,10 +29,14 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     ALLOWED_HOSTS: str = "localhost,127.0.0.1,freedomos.vulcantech.co,vulcantech.tech"
     
-    # Database
+    # Database (DigitalOcean Managed PostgreSQL)
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/grapheneos_db",
+        default="postgresql+asyncpg://doadmin:AVNS_4JvwOl3UBWtVfQ5aTaF@db-postgresql-nyc3-46529-do-user-315641620.j.db.ondigitalocean.com:25060/defaultdb?sslmode=require",
         description="PostgreSQL database URL",
+    )
+    DATABASE_CA_CERT: str = Field(
+        default="ca-certificate.crt",
+        description="Path to CA certificate for SSL (relative to project root or absolute)",
     )
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
@@ -55,6 +59,16 @@ class Settings(BaseSettings):
     # CORS - Allow all origins (frontend can run on IP or any domain)
     CORS_ORIGINS: str = "*"
     
+    # Storage (Drive)
+    DEFAULT_STORAGE_QUOTA_BYTES: int = Field(
+        default=5 * 1024 * 1024 * 1024,  # 5GB free tier
+        description="Default storage quota per user in bytes",
+    )
+    ADMIN_EMAILS: str = Field(
+        default="",
+        description="Comma-separated admin emails for CMS/admin APIs",
+    )
+
     # Email (for encrypted email service)
     EMAIL_DOMAIN: str = Field(
         default="vulcantech.tech",

@@ -746,9 +746,26 @@ async def unlock_public_content(
                 content={"error": "Passcode salt not found"}
             )
         
-        # Derive key from passcode
+        # Get user/owner for context (complex derivation)
+        user_email = None
+        if email_data_json:
+            import json
+            meta_key = f"{REDIS_ACCESS_TOKEN_PREFIX}{token}"
+            meta_json = await redis.get(meta_key)
+            if meta_json:
+                try:
+                    meta = json.loads(meta_json)
+                    user_email = meta.get("user_email")
+                except json.JSONDecodeError:
+                    pass
+        owner_email = file_metadata.get("owner_email") if file_metadata else None
+        
+        # Derive key (complex chain - same as email/drive)
+        from app.core.secure_derivation import derive_user_key_complex
         salt = base64.b64decode(salt_base64)
-        passcode_key = derive_key_from_passcode(unlock_data.passcode, salt)
+        base_key = derive_key_from_passcode(unlock_data.passcode, salt)
+        ctx = salt + (user_email or owner_email or "passcode").encode()
+        passcode_key = derive_user_key_complex(base_key, ctx)
         
         # Verify passcode by attempting to decrypt content key
         try:

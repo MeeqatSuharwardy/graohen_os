@@ -39,6 +39,10 @@ from app.core.security_hardening import (
 
 logger = logging.getLogger(__name__)
 
+# ProtonMail-like security: rate limits and size limits
+EMAIL_SEND_RATE_LIMIT = 30  # emails per hour per user
+EMAIL_MAX_BODY_BYTES = 500 * 1024  # 500KB max (prevents abuse)
+
 router = APIRouter()
 security = HTTPBearer()
 
@@ -54,10 +58,17 @@ EXTERNAL_HTTPS_BASE_URL = settings.EXTERNAL_HTTPS_BASE_URL
 
 # Pydantic Models
 class EmailSendRequest(BaseModel):
-    """Email send request"""
-    to: List[EmailStr] = Field(..., min_items=1, description="Recipient email addresses")
-    subject: Optional[str] = Field(None, max_length=500, description="Email subject (encrypted)")
-    body: str = Field(..., min_length=1, description="Email body content")
+    """Email send request - ProtonMail-style E2E encrypted"""
+    to: List[EmailStr] = Field(..., min_length=1, max_length=50, description="Recipient email addresses")
+    subject: Optional[str] = Field(None, max_length=500, description="Email subject (encrypted with body)")
+    body: str = Field(..., min_length=1, description="Email body (encrypted, max 500KB)")
+
+    @field_validator("body")
+    @classmethod
+    def validate_body_size(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > EMAIL_MAX_BODY_BYTES:
+            raise ValueError(f"Email body exceeds {EMAIL_MAX_BODY_BYTES // 1024}KB limit")
+        return v
     passcode: Optional[str] = Field(None, min_length=4, max_length=128, description="Optional passcode for email protection")
     expires_in_hours: Optional[int] = Field(None, ge=1, le=8760, description="Expiration time in hours (1-8760)")
     self_destruct: bool = Field(False, description="Delete email after first read")
@@ -293,6 +304,21 @@ async def send_email(
         service = get_email_service_mongodb()
         security = get_security_service()
         client_ip = request.client.host if request.client else "unknown"
+        user_email = current_user.get("email")
+
+        # Rate limit: 30 emails/hour per user (ProtonMail-like)
+        try:
+            await security.check_rate_limit(
+                identifier=user_email,
+                max_requests=EMAIL_SEND_RATE_LIMIT,
+                window_seconds=3600,
+                action="email_send",
+            )
+        except RateLimitError:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Email send rate limit exceeded. Max {EMAIL_SEND_RATE_LIMIT} per hour.",
+            )
         
         # Prepare email body (include subject in body for encryption)
         email_body_content = email_data.body
