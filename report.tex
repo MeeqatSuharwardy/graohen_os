@@ -1,0 +1,337 @@
+\documentclass[12pt,a4paper]{article}
+
+% Encoding / fonts (safe defaults)
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+% Layout & utilities
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{tabularx}
+\usepackage[hidelinks]{hyperref}
+
+% Fancy header/footer (fix headheight warning)
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{GrapheneOS Flasher - Implementation Report}
+\fancyhead[R]{\today}
+\fancyfoot[C]{\thepage}
+\setlength{\headheight}{15pt}
+
+% Colors
+\definecolor{success}{RGB}{34, 139, 34}
+\definecolor{warning}{RGB}{255, 165, 0}
+\definecolor{info}{RGB}{30, 144, 255}
+
+% Title formatting (FIXED)
+\titleformat{\section}
+  {\Large\bfseries\color{blue!70!black}}
+  {\thesection}{0.75em}{}[\titlerule[0.5pt]]
+
+\titleformat{\subsection}
+  {\large\bfseries}
+  {\thesubsection}{0.75em}{}
+
+% Document metadata
+\title{\textbf{GrapheneOS Flasher Project}\\
+\large Implementation Report}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\vspace{0.5cm}
+
+\begin{abstract}
+This report documents what has been implemented in the GrapheneOS Flasher project. The application consists of a desktop application built with Electron and a Python backend service for device communication and flashing operations.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Backend Service}
+
+\subsection{Implementation}
+
+A Python FastAPI service has been implemented at \texttt{backend/device-service/main.py}.
+
+\subsection{API Endpoints}
+
+The service exposes the following endpoints:
+
+\begin{itemize}
+    \item \texttt{GET /api/v1/tools/check} - Checks if ADB and Fastboot are installed
+    \item \texttt{GET /api/v1/devices/adb} - Lists devices connected via ADB
+    \item \texttt{GET /api/v1/devices/fastboot} - Lists devices in fastboot mode
+    \item \texttt{GET /api/v1/devices/\{serial\}/props} - Retrieves device properties
+    \item \texttt{POST /api/v1/devices/\{serial\}/reboot-bootloader} - Reboots device to bootloader
+    \item \texttt{POST /api/v1/actions/\{action\}} - Executes actions (unlock\_bootloader, flash\_bundle, verify\_bundle)
+    \item \texttt{GET /api/v1/health} - Health check endpoint
+\end{itemize}
+
+\subsection{Device Operations}
+
+The service implements:
+
+\begin{itemize}
+    \item Device detection in ADB and Fastboot modes
+    \item Device property retrieval using \texttt{adb shell getprop}
+    \item Device compatibility checking against supported Pixel devices
+    \item Reboot to bootloader functionality
+    \item Bootloader unlock command execution
+    \item Bundle path validation
+    \item SHA256 checksum verification for image bundles
+    \item Flashing process execution using official GrapheneOS flash scripts
+\end{itemize}
+
+\subsection{Supported Devices}
+
+The service recognizes the following device codenames:
+
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{|X|X|}
+\hline
+\textbf{Device Model} & \textbf{Codename} \\
+\hline
+Pixel 7 Pro & cheetah \\
+\hline
+Pixel 7 & panther \\
+\hline
+Pixel 7a & lynx \\
+\hline
+Pixel Fold & felix \\
+\hline
+Pixel Tablet & tangorpro \\
+\hline
+Pixel 8 & shiba \\
+\hline
+Pixel 8 Pro & husky \\
+\hline
+Pixel 8a & akita \\
+\hline
+\end{tabularx}
+\caption{Supported Device Codenames}
+\end{table}
+
+\subsection{Command Execution}
+
+The service executes ADB and Fastboot commands asynchronously with:
+\begin{itemize}
+    \item Timeout protection (default 30 seconds, configurable)
+    \item Dry-run mode support
+    \item Error handling and logging
+    \item Subprocess management
+\end{itemize}
+
+\subsection{Logging}
+
+Operations are logged to:
+\begin{itemize}
+    \item File: \texttt{\textasciitilde/.grapheneos-flasher/logs/flasher\_YYYYMMDD\_HHMMSS.log}
+    \item Console output
+\end{itemize}
+
+\section{Desktop Application}
+
+\subsection{Implementation}
+
+An Electron desktop application has been implemented at \texttt{frontend/packages/desktop/}.
+
+\subsection{Main Process}
+
+The Electron main process (\texttt{electron/main.ts}) implements:
+\begin{itemize}
+    \item Python service lifecycle management (start/stop)
+    \item Browser window creation
+    \item IPC handlers for device operations
+    \item Bundle directory selection dialog
+    \item Bundle scanning functionality
+\end{itemize}
+
+\subsection{Preload Script}
+
+The preload script (\texttt{electron/preload.ts}) exposes the device API to the renderer process:
+\begin{itemize}
+    \item \texttt{checkTools()} - Check ADB/Fastboot installation
+    \item \texttt{listAdbDevices()} - List ADB devices
+    \item \texttt{listFastbootDevices()} - List fastboot devices
+    \item \texttt{getDeviceProps(serial)} - Get device properties
+    \item \texttt{rebootToBootloader(serial)} - Reboot to bootloader
+    \item \texttt{runAction(action, payload)} - Execute device actions
+    \item \texttt{selectBundleDirectory()} - Open directory picker
+    \item \texttt{scanBundles(basePath)} - Scan for bundles
+\end{itemize}
+
+\subsection{User Interface}
+
+The React application (\texttt{src/App.tsx}) implements an 8-step wizard:
+
+\begin{enumerate}
+    \item Prerequisites - Check ADB/Fastboot installation
+    \item Detect Device - Connect and identify device
+    \item Reboot to Bootloader - Enter fastboot mode
+    \item Unlock Bootloader - Unlock with confirmation
+    \item Select Bundle - Choose GrapheneOS factory image
+    \item Verify Bundle - Validate SHA256 checksum
+    \item Flash GrapheneOS - Execute flashing process
+    \item Post-Flash Validation - Verify installation
+\end{enumerate}
+
+\subsection{Features}
+
+The application includes:
+\begin{itemize}
+    \item Tool status checking on startup
+    \item Device detection with 2-second polling interval
+    \item Device information display (serial, model, codename, Android version, build fingerprint)
+    \item Bootloader unlock confirmation requiring "UNLOCK" text input
+    \item Bundle directory browsing
+    \item Bundle scanning and codename matching
+    \item SHA256 verification
+    \item Dry-run mode toggle
+    \item Real-time log display
+    \item Step navigation with validation
+\end{itemize}
+
+\section{UI Component Library}
+
+\subsection{Implementation}
+
+A shared React component library has been implemented at \texttt{frontend/packages/ui/}.
+
+\subsection{Components}
+
+The following components have been implemented:
+
+\begin{itemize}
+    \item \texttt{Wizard} - Step-by-step navigation component
+    \item \texttt{DevicePanel} - Device information display
+    \item \texttt{LogsPanel} - Real-time log viewer
+    \item \texttt{StatusCard} - Status indicator component
+    \item \texttt{Button} - Button component
+    \item \texttt{Card} - Card container component
+    \item \texttt{Input} - Text input component
+    \item \texttt{Textarea} - Textarea component
+    \item \texttt{Alert} - Alert/notification component
+    \item \texttt{Badge} - Badge component
+\end{itemize}
+
+\subsection{Styling}
+
+Components are styled using:
+\begin{itemize}
+    \item Tailwind CSS
+    \item shadcn/ui component patterns
+    \item Lucide React icons
+\end{itemize}
+
+\section{Safety Features}
+
+\subsection{Dry Run Mode}
+
+Operations can be executed in dry-run mode, which logs commands without executing them.
+
+\subsection{Confirmation Gates}
+
+\begin{itemize}
+    \item Bootloader unlock requires typing "UNLOCK" in a confirmation field
+    \item Warning messages displayed for data loss operations
+\end{itemize}
+
+\subsection{Device Validation}
+
+\begin{itemize}
+    \item Only devices with recognized codenames are considered supported
+    \item Codename matching between detected device and selected bundle
+    \item Device state validation (must be in correct mode for operations)
+\end{itemize}
+
+\subsection{Bundle Verification}
+
+\begin{itemize}
+    \item SHA256 checksum validation against \texttt{image.zip.sha256} file
+    \item File existence checks for required bundle files
+    \item Signature file detection (verification not yet implemented)
+\end{itemize}
+
+\section{Technical Stack}
+
+\subsection{Frontend}
+
+\begin{itemize}
+    \item React 18
+    \item TypeScript
+    \item Electron
+    \item Tailwind CSS
+    \item shadcn/ui
+    \item Vite
+    \item Lucide React
+\end{itemize}
+
+\subsection{Backend}
+
+\begin{itemize}
+    \item Python 3.9+
+    \item FastAPI
+    \item Uvicorn
+    \item Pydantic
+\end{itemize}
+
+\section{Project Structure}
+
+The project is organized as a monorepo:
+
+\begin{itemize}
+    \item \texttt{frontend/packages/ui/} - Shared React component library
+    \item \texttt{frontend/packages/desktop/} - Electron desktop application
+    \item \texttt{frontend/packages/web/} - Web demo application
+    \item \texttt{backend/device-service/} - Python FastAPI service
+    \item \texttt{architecture/} - Architecture diagrams
+\end{itemize}
+
+\section{Documentation}
+
+The following documentation files have been created:
+
+\begin{itemize}
+    \item \texttt{README.md} - Project overview and quick start guide
+    \item \texttt{SETUP.md} - Setup instructions
+    \item \texttt{backend/device-service/README.md} - Backend service documentation
+\end{itemize}
+
+\section{Testing}
+
+\subsection{Backend Tests}
+
+Unit tests have been implemented at \texttt{backend/device-service/test\_device\_service.py}.
+
+\subsection{Test Execution}
+
+Tests can be run with:
+\begin{verbatim}
+cd backend/device-service
+python -m pytest test_device_service.py
+\end{verbatim}
+
+\section{Platform Support}
+
+The application has been implemented to support:
+\begin{itemize}
+    \item macOS
+    \item Linux
+    \item Windows
+\end{itemize}
+
+Platform-specific setup instructions are documented in \texttt{README.md}.
+
+\end{document}

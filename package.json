@@ -1,0 +1,15 @@
+{
+  "name": "flashdash",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cd frontend && pnpm dev",
+    "dev:desktop": "cd frontend && pnpm dev:desktop",
+    "dev:web": "cd frontend && pnpm dev:web",
+    "dev:web-flasher": "cd frontend && pnpm dev:web-flasher",
+    "dev:all": "cd frontend && pnpm dev:all",
+    "build": "cd frontend && pnpm build",
+    "install": "cd frontend && pnpm install"
+  },
+  "description": "FlashDash - GrapheneOS Flashing Dashboard"
+}
