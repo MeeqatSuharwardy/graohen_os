@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, AsyncSessionLocal
+from app.core import database
 from app.models.user import User
 from app.core.security import hash_password
 import logging
@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Get user by email from PostgreSQL."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         return None
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         result = await session.execute(select(User).where(User.email == email.lower()))
         user = result.scalar_one_or_none()
         if not user:
@@ -32,9 +32,9 @@ async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
 
 async def create_user(email: str, password: str, full_name: Optional[str] = None) -> Dict[str, Any]:
     """Create user in PostgreSQL. Raises ValueError if email exists."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         raise RuntimeError("Database not initialized")
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         result = await session.execute(select(User).where(User.email == email.lower()))
         if result.scalar_one_or_none():
             raise ValueError("Email already registered")
