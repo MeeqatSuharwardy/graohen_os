@@ -86,6 +86,9 @@ class EmailSendResponse(BaseModel):
     secure_link: str = Field(..., description="Secure HTTPS link for recipients")
     expires_at: Optional[str] = Field(None, description="Expiration timestamp")
     encryption_mode: str = Field(..., description="authenticated or passcode_protected")
+    notifications_sent: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Per-recipient notification status: [{to, sent}, ...]"
+    )
 
 
 class EmailUnlockRequest(BaseModel):
@@ -355,13 +358,19 @@ async def send_email(
 
         # Send notification to recipients (Gmail, Yahoo, etc.) if requested
         notification_delivery = getattr(email_data, "notification_delivery", "none")
+        notification_results: List[Dict[str, Any]] = []
         if notification_delivery in ("link_only", "link_and_passcode"):
             for recipient in email_data.to:
-                await send_secure_message_notification(
+                sent = await send_secure_message_notification(
                     to_email=recipient,
                     sender_email=user_email,
                     secure_link=secure_link,
                     notification_type=notification_delivery,
+                )
+                notification_results.append({"to": recipient, "sent": sent})
+                logger.info(
+                    f"Notification {'SENT' if sent else 'FAILED'} to {recipient} "
+                    f"(email_id={access_token[:8]}..., sender={user_email})"
                 )
         
         # Log email sent event
@@ -401,6 +410,7 @@ async def send_email(
             secure_link=secure_link,
             expires_at=result.get("expires_at"),
             encryption_mode=encryption_mode,
+            notifications_sent=notification_results if notification_results else None,
         )
         
         return response
