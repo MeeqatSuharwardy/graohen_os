@@ -728,12 +728,12 @@ async def _do_login(
             action="login",
             metadata={
                 "device_id": device_id,
-                "device_key_stored": bool(credentials.device_key_fingerprint),
+                "device_key_stored": bool(device_key_fingerprint),
             },
             success=True,
         )
         
-        logger.info(f"User logged in: {credentials.email}")
+        logger.info(f"User logged in: {email}")
         
         return TokenResponse(
             access_token=access_token,
