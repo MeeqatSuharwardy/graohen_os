@@ -522,4 +522,3 @@ async def download_release(
         if image_zip_path.exists():
             image_zip_path.unlink()
         raise
-
