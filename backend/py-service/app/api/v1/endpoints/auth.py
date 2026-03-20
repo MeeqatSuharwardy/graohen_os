@@ -24,7 +24,7 @@ from app.core.security_hardening import (
     SecurityEvent,
     BruteForceError,
 )
-from app.services.user_service_mongodb import get_user_service
+from app.services.user_service import get_user_service
 from app.core.secure_derivation import get_current_time_slot
 from app.services.device_key_service import (
     create_device_seed_for_user,
@@ -160,9 +160,7 @@ class DeviceEncryptionKeyResponse(BaseModel):
 
 async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """
-    Get user by email from MongoDB.
-    
-    Uses email hash for lookup, then decrypts email for verification.
+    Get user by email from PostgreSQL.
     """
     try:
         user_service = get_user_service()
@@ -174,9 +172,7 @@ async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
 
 async def create_user(email: str, password: str, full_name: Optional[str] = None) -> Dict[str, Any]:
     """
-    Create a new user with encrypted data.
-    
-    Encrypts email and full_name before storing in MongoDB.
+    Create a new user in PostgreSQL.
     """
     try:
         user_service = get_user_service()

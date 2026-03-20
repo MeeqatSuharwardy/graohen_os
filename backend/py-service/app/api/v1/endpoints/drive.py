@@ -17,13 +17,16 @@ from app.services.email_service import (
     get_email_service,
     EmailEncryptionError,
 )
-from app.services.drive_service_mongodb import (
-    get_drive_service_mongodb,
+from app.services.drive_service import (
+    get_drive_service,
+    get_file_metadata as get_file_metadata_from_db,
+    get_encrypted_file as get_encrypted_file_from_db,
+    list_user_files as list_user_files_from_db,
+    get_user_storage_used as get_user_storage_used_from_db,
     DriveEncryptionError,
 )
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.redis_client import get_redis
-from app.core.mongodb import get_mongodb
 from app.core.encryption import encrypt_bytes, decrypt_bytes, generate_key, KEY_SIZE
 
 logger = logging.getLogger(__name__)
@@ -278,31 +281,8 @@ async def store_file_metadata(
 
 
 async def get_file_metadata(file_id: str) -> Optional[Dict[str, Any]]:
-    """Get file metadata from MongoDB"""
-    try:
-        db = get_mongodb()
-        files_collection = db.files
-        
-        file_doc = await files_collection.find_one({"file_id": file_id})
-        if not file_doc:
-            return None
-        
-        # Convert MongoDB document to metadata format
-        metadata = {
-            "file_id": file_doc.get("file_id"),
-            "filename": file_doc.get("filename"),
-            "size": file_doc.get("size"),
-            "content_type": file_doc.get("content_type"),
-            "owner_email": file_doc.get("owner_email"),
-            "passcode_protected": file_doc.get("passcode_protected", False),
-            "created_at": file_doc.get("created_at").isoformat() if file_doc.get("created_at") else None,
-            "expires_at": file_doc.get("expires_at").isoformat() if file_doc.get("expires_at") else None,
-        }
-        
-        return metadata
-    except Exception as e:
-        logger.error(f"Failed to get file metadata from MongoDB: {e}", exc_info=True)
-        return None
+    """Get file metadata from PostgreSQL"""
+    return await get_file_metadata_from_db(file_id)
 
 
 async def store_encrypted_file(
@@ -332,23 +312,8 @@ async def store_encrypted_file(
 
 
 async def get_encrypted_file(file_id: str) -> Optional[Dict[str, Any]]:
-    """Get encrypted file data from MongoDB"""
-    try:
-        drive_service = get_drive_service_mongodb()
-        file_doc = await drive_service.get_file_from_mongodb(file_id)
-        
-        if not file_doc:
-            return None
-        
-        # Return encrypted data in expected format
-        return {
-            "encrypted_content": file_doc.get("encrypted_content"),
-            "encrypted_content_key": file_doc.get("encrypted_content_key"),
-            "stored_at": file_doc.get("created_at").isoformat() if file_doc.get("created_at") else None,
-        }
-    except Exception as e:
-        logger.error(f"Failed to get encrypted file from MongoDB: {e}", exc_info=True)
-        return None
+    """Get encrypted file data from PostgreSQL"""
+    return await get_encrypted_file_from_db(file_id)
 
 
 async def store_passcode_salt(file_id: str, salt_base64: str, expires_in_seconds: Optional[int] = None) -> None:
@@ -421,43 +386,24 @@ async def reset_unlock_attempts(file_id: str) -> None:
     await redis.delete(key)
 
 
-<<<<<<< HEAD
 async def get_user_storage_used(user_email: str) -> int:
-    """Get total storage used by user in bytes"""
-    redis = await get_redis()
-    storage_key = f"{REDIS_USER_STORAGE_PREFIX}{user_email.lower()}"
-    storage_bytes = await redis.get(storage_key)
-    return int(storage_bytes) if storage_bytes else 0
+    """Get total storage used by user in bytes (from PostgreSQL drive_files)"""
+    return await get_user_storage_used_from_db(user_email)
 
 
 async def get_user_storage_quota(user_email: str) -> int:
     """Get storage quota for user in bytes (default: 5GB)"""
-    redis = await get_redis()
-    quota_key = f"{REDIS_USER_STORAGE_PREFIX}{user_email.lower()}:quota"
-    quota_bytes = await redis.get(quota_key)
-    if quota_bytes:
-        return int(quota_bytes)
-    # Return default quota
-    return DEFAULT_STORAGE_QUOTA_BYTES
+    return settings.DEFAULT_STORAGE_QUOTA_BYTES
 
 
 async def increment_user_storage(user_email: str, bytes_to_add: int) -> None:
-    """Increment user storage usage"""
-    redis = await get_redis()
-    storage_key = f"{REDIS_USER_STORAGE_PREFIX}{user_email.lower()}"
-    await redis.incrby(storage_key, bytes_to_add)
-    # Set expiration to match message expiration (30 days)
-    await redis.expire(storage_key, 30 * 24 * 3600)
+    """No-op: storage is computed from PostgreSQL drive_files"""
+    pass
 
 
 async def decrement_user_storage(user_email: str, bytes_to_remove: int) -> None:
-    """Decrement user storage usage"""
-    redis = await get_redis()
-    storage_key = f"{REDIS_USER_STORAGE_PREFIX}{user_email.lower()}"
-    current = await get_user_storage_used(user_email)
-    new_value = max(0, current - bytes_to_remove)
-    await redis.set(storage_key, str(new_value))
-    await redis.expire(storage_key, 30 * 24 * 3600)
+    """No-op: storage is computed from PostgreSQL drive_files"""
+    pass
 
 
 async def check_storage_quota(user_email: str, file_size: int) -> bool:
@@ -467,20 +413,21 @@ async def check_storage_quota(user_email: str, file_size: int) -> bool:
     return (current_used + file_size) <= quota
 
 
+async def check_storage_available(user_email: str, file_size: int) -> bool:
+    """Alias for check_storage_quota"""
+    return await check_storage_quota(user_email, file_size)
+
+
 async def add_user_file(user_email: str, file_id: str) -> None:
-    """Add file ID to user's file list"""
-    redis = await get_redis()
-    user_files_key = f"{REDIS_USER_FILES_PREFIX}{user_email.lower()}"
-    await redis.sadd(user_files_key, file_id)
-    await redis.expire(user_files_key, 30 * 24 * 3600)
+    """No-op: files are in PostgreSQL"""
+    pass
 
 
 async def remove_user_file(user_email: str, file_id: str) -> None:
-    """Remove file ID from user's file list"""
-    redis = await get_redis()
-    user_files_key = f"{REDIS_USER_FILES_PREFIX}{user_email.lower()}"
-    await redis.srem(user_files_key, file_id)
-=======
+    """No-op: files are in PostgreSQL"""
+    pass
+
+
 @router.get("/storage", response_model=StorageInfoResponse)
 async def get_storage_info(
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -496,7 +443,6 @@ async def get_storage_info(
         quota_gb=round(quota / (1024 * 1024 * 1024), 2),
         percent_used=round((used / quota * 100), 2) if quota else 0,
     )
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
 
 
 @router.post("/upload", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -532,21 +478,8 @@ async def upload_file(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="File is empty"
             )
-<<<<<<< HEAD
         
         # Check storage quota (5GB per user)
-        user_email = current_user.get("email")
-        if not await check_storage_quota(user_email, file_size):
-            current_used = await get_user_storage_used(user_email)
-            quota = await get_user_storage_quota(user_email)
-            available = quota - current_used
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Storage quota exceeded. Used: {current_used / (1024**3):.2f}GB / {quota / (1024**3):.2f}GB. Available: {available / (1024**3):.2f}GB"
-            )
-=======
-
-        # Check storage quota (5GB free tier, admin can increase)
         user_email = current_user.get("email")
         if not await check_storage_available(user_email, file_size):
             used = await get_user_storage_used(user_email)
@@ -555,13 +488,9 @@ async def upload_file(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"Storage quota exceeded. Used: {used / (1024*1024):.1f}MB, Quota: {quota / (1024*1024*1024):.1f}GB"
             )
-
-        # Generate file ID
-        file_id = generate_file_id()
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
         
         # Use MongoDB drive service with strong encryption
-        drive_service = get_drive_service_mongodb()
+        drive_service = get_drive_service()
         user_email = current_user.get("email")
         
         # Calculate expiration based on never_expire flag
@@ -587,53 +516,10 @@ async def upload_file(
         file_id = result["file_id"]
         passcode_protected = result["passcode_protected"]
         
-<<<<<<< HEAD
         # Calculate expiration for response
         expires_at = None
         if not never_expire and expires_in_hours_calculated:
             expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours_calculated)
-        
-        # Update user storage usage
-        await increment_user_storage(user_email, file_size)
-        await add_user_file(user_email, file_id)
-        
-        # Passcode salt is stored in MongoDB by drive service
-        # No need for separate Redis storage
-=======
-        # Generate and store session key for device-local access
-        # Session key is the content key (decrypted) - stored for device biometric access
-        # For authenticated files (no passcode), we can decrypt and store the content key now
-        if not passcode_protected:
-            try:
-                from app.api.v1.endpoints.public import store_session_key
-                user_email = current_user.get("email")
-                from app.core.key_manager import derive_key_from_passcode, generate_salt_for_identifier
-                from app.core.encryption import decrypt_bytes
-                from app.core.secure_derivation import derive_user_key_complex
-                
-                user_salt = generate_salt_for_identifier(user_email)
-                base_key = derive_key_from_passcode(user_email, user_salt)
-                user_key = derive_user_key_complex(base_key, user_salt + user_email.encode())
-                
-                # Decrypt content key to get session key
-                session_key = decrypt_bytes(encrypted_content_key, user_key)
-                
-                # Store session key for device access (7 days default, or match file expiration)
-                session_expire_hours = expires_in_hours if expires_in_hours else 168
-                await store_session_key(file_id, session_key, session_expire_hours)
-                
-                # Securely overwrite
-                user_key = b"\x00" * len(user_key)
-                session_key = b"\x00" * len(session_key)
-                
-                logger.info(f"Session key stored for file: {file_id[:8]}...")
-            except Exception as e:
-                logger.warning(f"Failed to store session key for file {file_id}: {e}")
-                # Non-critical - file upload still succeeds
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
-        
-        # Update storage usage
-        await add_storage_used(user_email, file_size)
 
         logger.info(
             f"File uploaded: id={file_id[:8]}..., "
@@ -805,7 +691,7 @@ async def download_file(
         is_passcode_protected = metadata.get("passcode_protected", False)
         
         # Use MongoDB drive service to decrypt
-        drive_service = get_drive_service_mongodb()
+        drive_service = get_drive_service()
         user_email = current_user.get("email") if current_user else metadata.get("owner_email")
         
         if is_passcode_protected and token:
@@ -835,17 +721,6 @@ async def download_file(
                     detail="Authentication required for file decryption"
                 )
             
-<<<<<<< HEAD
-=======
-            # Decrypt content key using user key (complex derivation)
-            from app.core.key_manager import derive_key_from_passcode, generate_salt_for_identifier
-            from app.core.secure_derivation import derive_user_key_complex
-            
-            user_salt = generate_salt_for_identifier(user_email)
-            base_key = derive_key_from_passcode(user_email, user_salt)
-            user_key = derive_user_key_complex(base_key, user_salt + user_email.encode())
-            
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
             try:
                 decrypted_content = await drive_service.decrypt_file_for_authenticated_user(
                     file_id=file_id,
@@ -939,44 +814,7 @@ async def unlock_file(
                 detail="File does not require passcode unlock"
             )
         
-<<<<<<< HEAD
-        # Use MongoDB drive service to decrypt with passcode
-        drive_service = get_drive_service_mongodb()
-=======
-        # Get encrypted file data
-        file_data = await get_encrypted_file(file_id)
-        if not file_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File data not found or expired"
-            )
-        
-        # Get passcode salt
-        salt_base64 = await get_passcode_salt(file_id)
-        if not salt_base64:
-            # Try to get salt from email service metadata if available
-            owner_email = metadata.get("owner_email")
-            if owner_email:
-                from app.core.key_manager import generate_salt_for_identifier
-                salt = generate_salt_for_identifier(owner_email)
-                salt_base64 = base64.b64encode(salt).decode("utf-8")
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Passcode salt not found"
-                )
-        
-        # Decrypt using passcode (complex derivation)
-        encrypted_content_key = file_data["encrypted_content_key"]
-        
-        from app.core.key_manager import derive_key_from_passcode
-        from app.core.secure_derivation import derive_user_key_complex
-        salt = base64.b64decode(salt_base64)
-        base_key = derive_key_from_passcode(unlock_data.passcode, salt)
-        ctx = salt + (owner_email.encode() if owner_email else b"passcode")
-        passcode_key = derive_user_key_complex(base_key, ctx)
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
-        
+        drive_service = get_drive_service()
         try:
             # Decrypt file with passcode (service handles all decryption)
             file_content = await drive_service.decrypt_file_with_passcode(
@@ -1265,24 +1103,9 @@ async def delete_file(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: You don't own this file"
             )
-<<<<<<< HEAD
-        
-        # Get file size and owner before deletion
         file_size = metadata.get("size", 0)
-        
-        # Delete file from MongoDB
-        drive_service = get_drive_service_mongodb()
+        drive_service = get_drive_service()
         deleted = await drive_service.delete_file(file_id)
-        
-        # Delete from Redis (cleanup)
-=======
-
-        # Get file size before delete for storage quota update
-        metadata = await get_file_metadata(file_id)
-        file_size = metadata.get("size", 0) if metadata else 0
-
-        # Delete file data and metadata
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
         redis = await get_redis()
         
         # Delete passcode salt (if exists)
@@ -1293,18 +1116,7 @@ async def delete_file(
         rate_limit_key = f"{REDIS_RATE_LIMIT_UNLOCK_PREFIX}{file_id}"
         await redis.delete(rate_limit_key)
         
-<<<<<<< HEAD
-        # Decrement user storage usage (using metadata we got before deletion)
-        if owner_email and file_size > 0:
-            await decrement_user_storage(owner_email, file_size)
-            await remove_user_file(owner_email, file_id)
-        
         if deleted:
-=======
-        if deleted > 0:
-            if file_size > 0:
-                await subtract_storage_used(current_user.get("email"), file_size)
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
             logger.info(f"File deleted: id={file_id[:8]}...")
             return FileDeleteResponse(
                 file_id=file_id,
@@ -1341,54 +1153,19 @@ async def list_files(
     """
     try:
         user_email = current_user.get("email")
-        
-        # Query MongoDB for user's files
-        db = get_mongodb()
-        files_collection = db.files
-        
-        # Build query
-        query = {
-            "owner_email": user_email.lower(),
-        }
-        
-        # Exclude expired files
-        query["$or"] = [
-            {"expires_at": {"$exists": False}},
-            {"expires_at": {"$gt": datetime.utcnow()}},
+        file_docs, total = await list_user_files_from_db(user_email, limit=limit, offset=offset)
+        files = [
+            FileListItem(
+                file_id=f.get("file_id"),
+                filename=f.get("filename", "unnamed"),
+                size=f.get("size", 0),
+                content_type=f.get("content_type"),
+                passcode_protected=f.get("passcode_protected", False),
+                created_at=f.get("created_at") or datetime.utcnow().isoformat(),
+                expires_at=f.get("expires_at"),
+            )
+            for f in file_docs
         ]
-        
-        # Get total count
-        total = await files_collection.count_documents(query)
-        
-        # Get files with pagination
-        cursor = files_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
-        file_docs = await cursor.to_list(length=limit)
-        
-        # Convert to response format
-        files = []
-        for file_doc in file_docs:
-            expires_at = None
-            if file_doc.get("expires_at"):
-                expires_at_value = file_doc["expires_at"]
-                if isinstance(expires_at_value, datetime):
-                    expires_at = expires_at_value.isoformat()
-                else:
-                    expires_at = expires_at_value
-            
-            created_at = file_doc.get("created_at")
-            if isinstance(created_at, datetime):
-                created_at = created_at.isoformat()
-            
-            files.append(FileListItem(
-                file_id=file_doc.get("file_id"),
-                filename=file_doc.get("filename", "unnamed"),
-                size=file_doc.get("size", 0),
-                content_type=file_doc.get("content_type"),
-                passcode_protected=file_doc.get("passcode_protected", False),
-                created_at=created_at or datetime.utcnow().isoformat(),
-                expires_at=expires_at,
-            ))
-        
         logger.info(f"Listed {len(files)} files for user: {user_email}")
         
         return FileListResponse(

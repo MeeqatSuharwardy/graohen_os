@@ -13,7 +13,7 @@ from app.services.email_service import (
     get_email_service,
     EmailEncryptionError,
 )
-from app.services.email_service_mongodb import (
+from app.services.email_service_postgres import (
     get_email_service_mongodb,
     EmailEncryptionError as MongoDBEmailEncryptionError,
 )

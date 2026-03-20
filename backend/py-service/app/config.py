@@ -77,22 +77,8 @@ class Settings(BaseSettings):
         description="Email domain for generating email addresses (e.g., howie@vulcantech.tech)",
     )
     EXTERNAL_HTTPS_BASE_URL: str = Field(
-        default="https://fxmail.ai",
+        default="https://vulcantech.tech",
         description="Base URL for external email links",
-    )
-    EMAIL_DOMAIN: str = Field(
-        default="fxmail.ai",
-        description="Email domain for generating email addresses",
-    )
-    
-    # MongoDB
-    MONGODB_CONNECTION_STRING: str = Field(
-        default="mongodb+srv://doadmin:R6j8Oe2r1h749U5C@db-mongodb-nyc3-19012-1834d74a.mongo.ondigitalocean.com/admin?tls=true&authSource=admin",
-        description="MongoDB connection string",
-    )
-    MONGODB_DATABASE: str = Field(
-        default="admin",
-        description="MongoDB database name",
     )
     
     # SMTP Email Server

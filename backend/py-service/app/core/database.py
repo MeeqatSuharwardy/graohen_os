@@ -80,6 +80,11 @@ async def init_db() -> None:
             autoflush=False,
         )
         
+        # Create tables (users, drive_files, emails)
+        from app.models import User, DriveFile, StoredEmail
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        
         logger.info("Database connection initialized")
 
 

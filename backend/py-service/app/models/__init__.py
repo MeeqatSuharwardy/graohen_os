@@ -1,10 +1,9 @@
 """Database Models"""
 
 from app.core.database import Base
+from app.models.user import User
+from app.models.drive_file import DriveFile
+from app.models.email import StoredEmail
 
-# Import all models here for Alembic to detect them
-# Example:
-# from app.models.user import User
-
-__all__ = ["Base"]
+__all__ = ["Base", "User", "DriveFile", "StoredEmail"]
 

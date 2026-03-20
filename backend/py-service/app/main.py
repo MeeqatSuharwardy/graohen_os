@@ -31,14 +31,6 @@ except ImportError:
     HAS_DB = False
     logger.warning("Database and Redis modules not available. Some features will be disabled.")
 
-# Import MongoDB (if available)
-try:
-    from app.core.mongodb import init_mongodb, close_mongodb
-    HAS_MONGODB = True
-except ImportError:
-    HAS_MONGODB = False
-    logger.warning("MongoDB module not available. Email and Drive features will be disabled.")
-
 # Import security middleware (if available)
 try:
     from app.middleware.security import (
@@ -76,13 +68,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Database/Redis initialization failed: {e}. Continuing without DB features.")
     
-    if HAS_MONGODB:
-        try:
-            await init_mongodb()
-            logger.info("MongoDB initialized")
-        except Exception as e:
-            logger.warning(f"MongoDB initialization failed: {e}. Email and Drive features will be disabled.")
-    
     logger.info("Application started successfully")
     
     yield
@@ -94,12 +79,6 @@ async def lifespan(app: FastAPI):
         try:
             await close_redis()
             await close_db()
-        except Exception:
-            pass
-    
-    if HAS_MONGODB:
-        try:
-            await close_mongodb()
         except Exception:
             pass
     
