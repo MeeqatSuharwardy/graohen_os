@@ -54,7 +54,10 @@ async def init_db() -> None:
     global engine, AsyncSessionLocal
     
     if not settings.DATABASE_URL:
-        logger.warning("DATABASE_URL not set in .env - skipping database init")
+        logger.warning(
+            "DATABASE_URL not set - skipping database init. "
+            "Ensure .env exists in backend/py-service/ with DATABASE_URL."
+        )
         return
     
     if engine is None:
