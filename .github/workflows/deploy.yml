@@ -28,10 +28,7 @@ jobs:
           script: |
             set -e
             APP_PATH="${{ secrets.VPS_APP_PATH }}"
-            if [ -z "$APP_PATH" ]; then
-              echo "Error: Set VPS_APP_PATH secret (e.g. /home/deploy/graohen_os)"
-              exit 1
-            fi
+            if [ -z "$APP_PATH" ]; then APP_PATH="$HOME/graohen_os"; fi
             REPO_URL="${{ secrets.REPO_URL }}"
             if [ -z "$REPO_URL" ]; then
               REPO_URL="https://github.com/${{ github.repository }}.git"
