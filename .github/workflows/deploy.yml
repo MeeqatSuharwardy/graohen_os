@@ -1,7 +1,7 @@
 # Deploy backend to VPS on push to main
-# For fresh VPS: installs deps, nginx, SSL, clones repo, venv, systemd
-# Domain: freedomos.vulcantech.co (ensure DNS A record points to VPS IP before deploy)
-# Secrets: VPS_HOST, VPS_USER, VPS_PASSWORD, ENV_FILE, LETSENCRYPT_EMAIL
+# For fresh VPS: installs deps, nginx, SSL (certbot), clones repo, venv, systemd
+# Domain: freedomos.vulcantech.co - DNS A record MUST point to VPS IP before deploy
+# Secrets: VPS_HOST, VPS_USER, VPS_PASSWORD, ENV_FILE, LETSENCRYPT_EMAIL (required for SSL)
 # Optional: VPS_APP_PATH, REPO_URL, DOMAIN (default: freedomos.vulcantech.co)
 # ENV_FILE = base64 of .env (run: base64 < backend/py-service/.env)
 
@@ -32,6 +32,7 @@ jobs:
             if [ -z "$APP_PATH" ]; then APP_PATH="$HOME/graohen_os"; fi
             DOMAIN="${{ secrets.DOMAIN }}"
             if [ -z "$DOMAIN" ]; then DOMAIN="freedomos.vulcantech.co"; fi
+            LETSENCRYPT_EMAIL="${{ secrets.LETSENCRYPT_EMAIL }}"
             REPO_URL="${{ secrets.REPO_URL }}"
             if [ -z "$REPO_URL" ]; then
               REPO_URL="https://github.com/${{ github.repository }}.git"
@@ -39,9 +40,15 @@ jobs:
             
             echo "=== Installing system dependencies ==="
             sudo apt-get update -qq
-            sudo apt-get install -y -qq python3-venv python3-pip git redis-server nginx certbot python3-certbot-nginx
+            sudo apt-get install -y -qq python3-venv python3-pip git redis-server nginx certbot python3-certbot-nginx ufw
             sudo systemctl start redis-server 2>/dev/null || true
             sudo systemctl enable redis-server 2>/dev/null || true
+            
+            echo "=== Opening firewall (80, 443, 22) ==="
+            sudo ufw allow 22/tcp 2>/dev/null || true
+            sudo ufw allow 80/tcp 2>/dev/null || true
+            sudo ufw allow 443/tcp 2>/dev/null || true
+            echo "y" | sudo ufw enable 2>/dev/null || true
             
             echo "=== Cloning/updating repo ==="
             PARENT_DIR="$(dirname "$APP_PATH")"
@@ -114,16 +121,23 @@ jobs:
             } | sudo tee /etc/nginx/sites-available/flashdash > /dev/null
             sudo ln -sf /etc/nginx/sites-available/flashdash /etc/nginx/sites-enabled/
             sudo rm -f /etc/nginx/sites-enabled/default
-            sudo nginx -t && sudo systemctl reload nginx
+            sudo nginx -t
+            sudo systemctl restart nginx
             sudo systemctl enable nginx
             
             echo "=== Setting up SSL (Let's Encrypt) ==="
-            LETSENCRYPT_EMAIL="${{ secrets.LETSENCRYPT_EMAIL }}"
-            if [ -n "$LETSENCRYPT_EMAIL" ]; then
-              sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$LETSENCRYPT_EMAIL" --redirect 2>/dev/null || echo "Certbot skipped (domain may not point here yet)"
-            else
-              echo "Set LETSENCRYPT_EMAIL secret for SSL. HTTP only for now."
+            if [ -z "$LETSENCRYPT_EMAIL" ]; then
+              echo "ERROR: LETSENCRYPT_EMAIL secret not set. Add it in GitHub Settings > Secrets for SSL."
+              exit 1
             fi
+            sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$LETSENCRYPT_EMAIL" --redirect 2>&1 || {
+              echo "Certbot failed. Ensure: 1) DNS A record for $DOMAIN points to this VPS IP, 2) Port 80 is reachable from internet."
+              exit 1
+            }
+            sudo systemctl reload nginx
+            sudo systemctl enable certbot.timer 2>/dev/null || true
+            sudo systemctl start certbot.timer 2>/dev/null || true
+            echo "SSL configured: https://$DOMAIN"
             
             echo "=== Deployment complete ==="
             sudo systemctl status flashdash --no-pager || true
