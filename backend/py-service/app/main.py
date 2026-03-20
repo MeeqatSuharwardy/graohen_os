@@ -7,11 +7,12 @@ _env_path = Path(__file__).resolve().parent.parent / ".env"
 if _env_path.exists():
     from dotenv import load_dotenv
     load_dotenv(_env_path)
-
+    
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
 import logging
 
 # Import unified config

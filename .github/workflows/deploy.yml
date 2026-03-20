@@ -89,6 +89,7 @@ jobs:
               echo "Type=simple"
               echo "User=$DEPLOY_USER"
               echo "WorkingDirectory=$APP_PATH/backend/py-service"
+              echo "EnvironmentFile=-$APP_PATH/backend/py-service/.env"
               echo "ExecStart=$APP_PATH/backend/py-service/venv/bin/gunicorn app.main:app -c gunicorn.conf.py"
               echo "Restart=always"
               echo "RestartSec=3"

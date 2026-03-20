@@ -21,5 +21,6 @@ loglevel = os.environ.get("LOG_LEVEL", "info").lower()
 # Process naming
 proc_name = "flashdash"
 
-# Preload app for faster worker spawn
-preload = True
+# Preload=False: each worker loads app and runs init_db in its own process.
+# Preload=True breaks async DB (connections don't survive fork).
+preload = False
