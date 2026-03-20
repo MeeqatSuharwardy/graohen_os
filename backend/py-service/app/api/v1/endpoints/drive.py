@@ -17,18 +17,9 @@ from app.services.email_service import (
     get_email_service,
     EmailEncryptionError,
 )
-<<<<<<< HEAD
 from app.services.drive_service_mongodb import (
     get_drive_service_mongodb,
     DriveEncryptionError,
-=======
-from app.services.storage_service import (
-    check_storage_available,
-    add_storage_used,
-    subtract_storage_used,
-    get_user_storage_used,
-    get_user_storage_quota,
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
 )
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.redis_client import get_redis
@@ -108,7 +99,6 @@ class FileDeleteResponse(BaseModel):
     message: str
 
 
-<<<<<<< HEAD
 class StorageQuotaResponse(BaseModel):
     """Storage quota response"""
     used_bytes: int
@@ -118,6 +108,15 @@ class StorageQuotaResponse(BaseModel):
     available_bytes: int
     available_gb: float
     percentage_used: float
+
+
+class StorageInfoResponse(BaseModel):
+    """Storage quota info for current user"""
+    used_bytes: int
+    quota_bytes: int
+    used_mb: float
+    quota_gb: float
+    percent_used: float
 
 
 class FileListItem(BaseModel):
@@ -178,15 +177,6 @@ class FileUploadEncryptedRequest(BaseModel):
     never_expire: bool = Field(False, description="If True, file never expires. If False, use expires_in_hours or expires_in_days")
     expires_in_hours: Optional[int] = Field(None, ge=1, le=8760, description="Expiration time in hours (only used if never_expire=False)")
     expires_in_days: Optional[int] = Field(None, ge=1, le=365, description="Expiration time in days (only used if never_expire=False, takes precedence over expires_in_hours)")
-=======
-class StorageInfoResponse(BaseModel):
-    """Storage quota info for current user"""
-    used_bytes: int
-    quota_bytes: int
-    used_mb: float
-    quota_gb: float
-    percent_used: float
->>>>>>> 98a312f (Update database credentials to DigitalOcean PostgreSQL, add SSL CA cert support)
 
 
 def generate_file_id() -> str:
