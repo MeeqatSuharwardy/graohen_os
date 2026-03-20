@@ -1,8 +1,9 @@
 # Deploy backend to VPS on push to main
-# Secrets: VPS_HOST, VPS_USER, VPS_PASSWORD, VPS_APP_PATH, ENV_FILE
-# VPS_APP_PATH = full path for repo (e.g. /home/deploy/graohen_os) - REQUIRED
+# For fresh VPS: installs deps, nginx, SSL, clones repo, venv, systemd
+# Domain: freedomos.vulcantech.co (ensure DNS A record points to VPS IP before deploy)
+# Secrets: VPS_HOST, VPS_USER, VPS_PASSWORD, ENV_FILE, LETSENCRYPT_EMAIL
+# Optional: VPS_APP_PATH, REPO_URL, DOMAIN (default: freedomos.vulcantech.co)
 # ENV_FILE = base64 of .env (run: base64 < backend/py-service/.env)
-# REPO_URL = optional; for private repos use https://x:TOKEN@github.com/owner/repo.git
 
 name: Deploy to VPS
 
@@ -12,13 +13,13 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/deploy.yml'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH (password auth)
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -29,10 +30,20 @@ jobs:
             set -e
             APP_PATH="${{ secrets.VPS_APP_PATH }}"
             if [ -z "$APP_PATH" ]; then APP_PATH="$HOME/graohen_os"; fi
+            DOMAIN="${{ secrets.DOMAIN }}"
+            if [ -z "$DOMAIN" ]; then DOMAIN="freedomos.vulcantech.co"; fi
             REPO_URL="${{ secrets.REPO_URL }}"
             if [ -z "$REPO_URL" ]; then
               REPO_URL="https://github.com/${{ github.repository }}.git"
             fi
+            
+            echo "=== Installing system dependencies ==="
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq python3-venv python3-pip git redis-server nginx certbot python3-certbot-nginx
+            sudo systemctl start redis-server 2>/dev/null || true
+            sudo systemctl enable redis-server 2>/dev/null || true
+            
+            echo "=== Cloning/updating repo ==="
             PARENT_DIR="$(dirname "$APP_PATH")"
             mkdir -p "$PARENT_DIR"
             if [ -d "$APP_PATH/.git" ]; then
@@ -43,17 +54,76 @@ jobs:
               git clone "$REPO_URL" "$APP_PATH"
               cd "$APP_PATH"
             fi
-            cd backend/py-service
             
-            # Write .env from ENV_FILE secret (base64 of .env)
+            echo "=== Setting up Python venv ==="
+            cd backend/py-service
+            rm -rf venv
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install -q -r requirements.txt
+            
+            echo "=== Writing .env ==="
             ENV_B64="${{ secrets.ENV_FILE }}"
             if [ -n "$ENV_B64" ]; then
               echo "$ENV_B64" | base64 -d > .env
               echo ".env written from GitHub secret"
+            else
+              echo "Warning: ENV_FILE secret not set - create backend/py-service/.env manually"
             fi
             
-            if [ ! -d venv ]; then python3 -m venv venv; fi
-            source venv/bin/activate
-            pip install -q -r requirements.txt
+            echo "=== Installing systemd service ==="
+            DEPLOY_USER=$(whoami)
+            {
+              echo "[Unit]"
+              echo "Description=FlashDash API (Gunicorn)"
+              echo "After=network.target"
+              echo ""
+              echo "[Service]"
+              echo "Type=simple"
+              echo "User=$DEPLOY_USER"
+              echo "WorkingDirectory=$APP_PATH/backend/py-service"
+              echo "ExecStart=$APP_PATH/backend/py-service/venv/bin/gunicorn app.main:app -c gunicorn.conf.py"
+              echo "Restart=always"
+              echo "RestartSec=3"
+              echo ""
+              echo "[Install]"
+              echo "WantedBy=multi-user.target"
+            } | sudo tee /etc/systemd/system/flashdash.service > /dev/null
+            
+            sudo systemctl daemon-reload
+            sudo systemctl enable flashdash
             sudo systemctl restart flashdash
-            echo "Deployment complete"
+            
+            echo "=== Setting up Nginx ==="
+            {
+              echo "server {"
+              echo "    listen 80;"
+              echo "    server_name $DOMAIN;"
+              echo "    location / {"
+              echo "        proxy_pass http://127.0.0.1:8000;"
+              echo "        proxy_http_version 1.1;"
+              echo "        proxy_set_header Upgrade \$http_upgrade;"
+              echo "        proxy_set_header Connection \"upgrade\";"
+              echo "        proxy_set_header Host \$host;"
+              echo "        proxy_set_header X-Real-IP \$remote_addr;"
+              echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;"
+              echo "        proxy_set_header X-Forwarded-Proto \$scheme;"
+              echo "        proxy_read_timeout 86400;"
+              echo "    }"
+              echo "}"
+            } | sudo tee /etc/nginx/sites-available/flashdash > /dev/null
+            sudo ln -sf /etc/nginx/sites-available/flashdash /etc/nginx/sites-enabled/
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo nginx -t && sudo systemctl reload nginx
+            sudo systemctl enable nginx
+            
+            echo "=== Setting up SSL (Let's Encrypt) ==="
+            LETSENCRYPT_EMAIL="${{ secrets.LETSENCRYPT_EMAIL }}"
+            if [ -n "$LETSENCRYPT_EMAIL" ]; then
+              sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$LETSENCRYPT_EMAIL" --redirect 2>/dev/null || echo "Certbot skipped (domain may not point here yet)"
+            else
+              echo "Set LETSENCRYPT_EMAIL secret for SSL. HTTP only for now."
+            fi
+            
+            echo "=== Deployment complete ==="
+            sudo systemctl status flashdash --no-pager || true
