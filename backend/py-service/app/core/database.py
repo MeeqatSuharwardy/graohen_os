@@ -2,6 +2,7 @@
 
 import ssl
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -62,12 +63,21 @@ async def init_db() -> None:
     
     if engine is None:
         connect_args = {}
-        if "sslmode=require" in settings.DATABASE_URL:
+        db_url = settings.DATABASE_URL
+        # asyncpg does not accept sslmode - strip it and use ssl context in connect_args
+        if "sslmode=" in db_url:
+            parsed = urlparse(db_url)
+            qs = parse_qs(parsed.query, keep_blank_values=True)
+            qs.pop("sslmode", None)
+            new_query = urlencode(qs, doseq=True)
+            db_url = urlunparse(parsed._replace(query=new_query))
             ssl_ctx = _get_ssl_context()
             if ssl_ctx:
                 connect_args["ssl"] = ssl_ctx
+            else:
+                connect_args["ssl"] = ssl.create_default_context()
         engine = create_async_engine(
-            settings.DATABASE_URL,
+            db_url,
             pool_size=settings.DATABASE_POOL_SIZE,
             max_overflow=settings.DATABASE_MAX_OVERFLOW,
             echo=settings.DATABASE_ECHO,
