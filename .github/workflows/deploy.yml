@@ -1,0 +1,35 @@
+# Deploy backend to VPS on push to main
+# Requires GitHub secrets: VPS_HOST, VPS_USER, VPS_PASSWORD
+# Add in Settings → Secrets and variables → Actions
+
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH (password auth)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            cd ~/graohen_os
+            git fetch origin
+            git reset --hard origin/main
+            cd backend/py-service
+            source venv/bin/activate
+            pip install -q -r requirements.txt
+            sudo systemctl restart flashdash
+            echo "Deployment complete"
