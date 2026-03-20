@@ -1,6 +1,8 @@
 # Deploy backend to VPS on push to main
-# Requires GitHub secrets: VPS_HOST, VPS_USER, VPS_PASSWORD
-# Add in Settings → Secrets and variables → Actions
+# Secrets: VPS_HOST, VPS_USER, VPS_PASSWORD, VPS_APP_PATH, ENV_FILE
+# VPS_APP_PATH = full path for repo (e.g. /home/deploy/graohen_os) - REQUIRED
+# ENV_FILE = base64 of .env (run: base64 < backend/py-service/.env)
+# REPO_URL = optional; for private repos use https://x:TOKEN@github.com/owner/repo.git
 
 name: Deploy to VPS
 
@@ -25,10 +27,35 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -e
-            cd ~/graohen_os
-            git fetch origin
-            git reset --hard origin/main
+            APP_PATH="${{ secrets.VPS_APP_PATH }}"
+            if [ -z "$APP_PATH" ]; then
+              echo "Error: Set VPS_APP_PATH secret (e.g. /home/deploy/graohen_os)"
+              exit 1
+            fi
+            REPO_URL="${{ secrets.REPO_URL }}"
+            if [ -z "$REPO_URL" ]; then
+              REPO_URL="https://github.com/${{ github.repository }}.git"
+            fi
+            PARENT_DIR="$(dirname "$APP_PATH")"
+            mkdir -p "$PARENT_DIR"
+            if [ -d "$APP_PATH/.git" ]; then
+              cd "$APP_PATH"
+              git fetch origin
+              git reset --hard origin/main
+            else
+              git clone "$REPO_URL" "$APP_PATH"
+              cd "$APP_PATH"
+            fi
             cd backend/py-service
+            
+            # Write .env from ENV_FILE secret (base64 of .env)
+            ENV_B64="${{ secrets.ENV_FILE }}"
+            if [ -n "$ENV_B64" ]; then
+              echo "$ENV_B64" | base64 -d > .env
+              echo ".env written from GitHub secret"
+            fi
+            
+            if [ ! -d venv ]; then python3 -m venv venv; fi
             source venv/bin/activate
             pip install -q -r requirements.txt
             sudo systemctl restart flashdash
