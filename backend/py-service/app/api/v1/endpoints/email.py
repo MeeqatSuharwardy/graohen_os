@@ -2,7 +2,7 @@
 
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -21,6 +21,7 @@ from app.services.email_ingestion import (
     get_email_ingestion_service,
     EmailIngestionError,
 )
+from app.services.smtp_service import send_secure_message_notification
 from app.middleware.email_security import (
     check_email_rate_limit,
     validate_email_token,
@@ -72,6 +73,10 @@ class EmailSendRequest(BaseModel):
     passcode: Optional[str] = Field(None, min_length=4, max_length=128, description="Optional passcode for email protection")
     expires_in_hours: Optional[int] = Field(None, ge=1, le=8760, description="Expiration time in hours (1-8760)")
     self_destruct: bool = Field(False, description="Delete email after first read")
+    notification_delivery: Literal["none", "link_only", "link_and_passcode"] = Field(
+        default="none",
+        description="Deliver notification to recipients: 'none' (return link only), 'link_only' (email with link), 'link_and_passcode' (link + note passcode shared separately)",
+    )
 
 
 class EmailSendResponse(BaseModel):
@@ -142,6 +147,10 @@ class EmailReplyRequest(BaseModel):
     passcode: Optional[str] = Field(None, min_length=4, max_length=128, description="Optional passcode for reply")
     expires_in_hours: Optional[int] = Field(None, ge=1, le=8760, description="Expiration in hours (1-8760)")
     self_destruct: bool = Field(False, description="Delete reply after first read")
+    notification_delivery: Literal["none", "link_only", "link_and_passcode"] = Field(
+        default="none",
+        description="Deliver notification to recipients",
+    )
 
 
 class DraftSaveRequest(BaseModel):
@@ -343,8 +352,17 @@ async def send_email(
         encryption_mode = result["encryption_mode"]
         email_address = result["email_address"]
         secure_link = result["secure_link"]
-        
-        # Self-destruct and expiration are handled in MongoDB service
+
+        # Send notification to recipients (Gmail, Yahoo, etc.) if requested
+        notification_delivery = getattr(email_data, "notification_delivery", "none")
+        if notification_delivery in ("link_only", "link_and_passcode"):
+            for recipient in email_data.to:
+                await send_secure_message_notification(
+                    to_email=recipient,
+                    sender_email=user_email,
+                    secure_link=secure_link,
+                    notification_type=notification_delivery,
+                )
         
         # Log email sent event
         await security.log_security_event(
@@ -387,7 +405,7 @@ async def send_email(
         
         return response
         
-    except EmailEncryptionError as e:
+    except (EmailEncryptionError, MongoDBEmailEncryptionError) as e:
         logger.error(f"Email encryption failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -425,19 +443,8 @@ async def get_inbox_emails(
             offset=offset,
         )
         
-        # Get total count
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        total_query = {
-            "recipient_emails": {"$in": [user_email.lower()]},
-            "is_draft": False,
-            "$or": [
-                {"expires_at": {"$exists": False}},
-                {"expires_at": {"$gt": datetime.utcnow()}},
-            ],
-        }
-        total = await email_collection.count_documents(total_query)
+        # Total count (PostgreSQL service returns list; MongoDB removed)
+        total = len(emails)
         
         # Validate and create EmailListItem objects
         email_items = []
@@ -494,19 +501,7 @@ async def get_sent_emails(
             offset=offset,
         )
         
-        # Get total count
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        total_query = {
-            "sender_email": user_email.lower(),
-            "is_draft": False,
-            "$or": [
-                {"expires_at": {"$exists": False}},
-                {"expires_at": {"$gt": datetime.utcnow()}},
-            ],
-        }
-        total = await email_collection.count_documents(total_query)
+        total = len(emails)
         
         return EmailListResponse(
             emails=[EmailListItem(**email) for email in emails],
@@ -546,14 +541,7 @@ async def get_draft_emails(
             offset=offset,
         )
         
-        # Get total count
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        total = await email_collection.count_documents({
-            "sender_email": user_email.lower(),
-            "is_draft": True,
-        })
+        total = len(emails)
         
         return EmailListResponse(
             emails=[EmailListItem(**email) for email in emails],
@@ -784,6 +772,17 @@ async def reply_to_email(
             subject=reply_subject,
             self_destruct=reply_data.self_destruct,
         )
+
+        # Send notification to recipients if requested
+        notification_delivery = getattr(reply_data, "notification_delivery", "none")
+        if notification_delivery in ("link_only", "link_and_passcode"):
+            for recipient in reply_to_emails:
+                await send_secure_message_notification(
+                    to_email=recipient,
+                    sender_email=user_email,
+                    secure_link=result["secure_link"],
+                    notification_type=notification_delivery,
+                )
 
         await security.log_security_event(
             SecurityEvent.EMAIL_SENT,
@@ -1078,6 +1077,11 @@ async def ingest_email(
         
         # Ingest email
         ingestion_service = get_email_ingestion_service()
+        if not ingestion_service:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Email ingestion service not available",
+            )
         result = await ingestion_service.ingest_email(
             email_bytes=email_bytes,
             recipient_address=recipient_address,
@@ -1121,69 +1125,31 @@ async def get_email_by_token(
     """
     Get encrypted email by token (for web viewer).
     
-    This endpoint allows accessing emails via token without authentication.
     Used by the web email viewer at fxmail.ai/email/{token}
-    
-    Security:
-    - Token must be at least 32 characters
-    - Returns encrypted payload (client decrypts)
-    - Never decrypts on server
+    Returns metadata only; use /unlock for passcode-protected emails.
     """
     try:
-        # Validate token entropy
         validate_email_token(token)
-        
-        # Use MongoDB email service
         service = get_email_service_mongodb()
         client_ip = request.client.host if request.client else "unknown"
-        
-        # Get email metadata from MongoDB
-        from app.core.mongodb import get_mongodb
-        db = get_mongodb()
-        email_collection = db.emails
-        
-        # Find email by email_id (token)
-        # Try both email_id and access_token (they should be the same)
-        email_doc = await email_collection.find_one({
-            "$or": [
-                {"email_id": token},
-                {"access_token": token}
-            ]
-        })
-        
-        if not email_doc:
+
+        stored = await service._get_stored_email(token)
+        if not stored:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Email not found"
             )
-        
-        # Check expiration
-        if email_doc.get("expires_at"):
-            expires_at = email_doc["expires_at"]
-            if isinstance(expires_at, str):
-                from datetime import datetime
-                expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-            if datetime.utcnow() > expires_at:
-                raise HTTPException(
-                    status_code=status.HTTP_410_GONE,
-                    detail="Email has expired"
-                )
-        
-        # Return metadata (encrypted content stays encrypted)
-        # Client will decrypt using passcode or authentication
-        encryption_mode = email_doc.get("encryption_mode", "authenticated")
-        is_passcode_protected = email_doc.get("has_passcode", False)
-        
-        # Log access
+
+        expires_at_str = stored.expires_at.isoformat() if stored.expires_at else None
         logger.info(f"Email accessed by token: {token[:16]}..., ip={client_ip}")
-        
+
         return EmailGetResponse(
             email_id=token,
-            subject=None,  # Subject is encrypted, don't expose
-            body="",  # Body is encrypted, don't expose
-            encryption_mode=encryption_mode,
-            expires_at=email_doc.get("expires_at").isoformat() if email_doc.get("expires_at") else None,
-            is_passcode_protected=is_passcode_protected,
+            subject=None,
+            body="",
+            encryption_mode=stored.encryption_mode or "authenticated",
+            expires_at=expires_at_str,
+            is_passcode_protected=stored.has_passcode,
         )
         
     except HTTPException:

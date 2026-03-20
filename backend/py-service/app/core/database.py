@@ -2,6 +2,7 @@
 
 import ssl
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -50,21 +51,36 @@ def _get_ssl_context() -> Optional[ssl.SSLContext]:
 
 
 async def init_db() -> None:
-    """Initialize database connection. DATABASE_URL must be set in .env."""
+    """Initialize database connection. DATABASE_URL from .env or systemd EnvironmentFile."""
     global engine, AsyncSessionLocal
     
-    if not settings.DATABASE_URL:
-        logger.warning("DATABASE_URL not set in .env - skipping database init")
+    db_url = settings.DATABASE_URL
+    if not db_url:
+        logger.warning(
+            "DATABASE_URL not set - skipping database init. "
+            "Source: .env or GitHub ENV_FILE secret. Update .env on VPS or ENV_FILE in GitHub Secrets."
+        )
         return
+    # Log that we have it (mask password)
+    _masked = db_url.split("@")[-1] if "@" in db_url else "***"
+    logger.info(f"Database URL loaded (host: {_masked[:50]}...)")
     
     if engine is None:
         connect_args = {}
-        if "sslmode=require" in settings.DATABASE_URL:
+        # asyncpg does not accept sslmode - strip it and use ssl context in connect_args
+        if "sslmode=" in db_url:
+            parsed = urlparse(db_url)
+            qs = parse_qs(parsed.query, keep_blank_values=True)
+            qs.pop("sslmode", None)
+            new_query = urlencode(qs, doseq=True)
+            db_url = urlunparse(parsed._replace(query=new_query))
             ssl_ctx = _get_ssl_context()
             if ssl_ctx:
                 connect_args["ssl"] = ssl_ctx
+            else:
+                connect_args["ssl"] = ssl.create_default_context()
         engine = create_async_engine(
-            settings.DATABASE_URL,
+            db_url,
             pool_size=settings.DATABASE_POOL_SIZE,
             max_overflow=settings.DATABASE_MAX_OVERFLOW,
             echo=settings.DATABASE_ECHO,

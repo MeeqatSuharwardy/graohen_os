@@ -19,3 +19,18 @@ class EmailSecurityMiddleware:
 
     async def __call__(self, scope, receive, send):
         await self.app(scope, receive, send)
+
+    @staticmethod
+    async def check_abuse_patterns(sender_email: str, recipients: list) -> None:
+        """Stub - no-op for abuse pattern check."""
+        pass
+
+    @staticmethod
+    async def log_email_send(*, user_email: str, recipients: list, email_id: str, success: bool) -> None:
+        """Stub - no-op for email send logging."""
+        pass
+
+    @staticmethod
+    def validate_email_size(size_bytes: int) -> None:
+        """Stub - no-op for email size validation."""
+        pass

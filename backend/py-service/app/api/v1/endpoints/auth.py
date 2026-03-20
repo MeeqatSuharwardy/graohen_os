@@ -371,8 +371,8 @@ async def register(
     try:
         await security.check_rate_limit(
             identifier=client_ip,
-            max_requests=5,
-            window_seconds=3600,
+            max_requests=settings.REGISTER_RATE_LIMIT_MAX,
+            window_seconds=settings.REGISTER_RATE_LIMIT_WINDOW,
             action="register",
         )
         

@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import httpx
 import hashlib
 import zipfile
@@ -7,6 +8,11 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 from app.config import settings
+
+# Cache for latest version lookup (single HTTP request to releases.atom)
+_LATEST_VERSION_CACHE: Optional[str] = None
+_LATEST_VERSION_CACHE_TIME: Optional[datetime] = None
+_LATEST_VERSION_CACHE_TTL = timedelta(minutes=5)
 
 
 def index_bundles() -> Dict[str, List[Dict[str, Any]]]:
@@ -171,34 +177,36 @@ def verify_bundle(bundle_path: str) -> Dict[str, Any]:
 
 
 async def find_latest_version(codename: str, max_days_back: int = 30) -> Optional[str]:
-    """Find the latest available GrapheneOS version for a codename by checking recent dates"""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Try the last N days, checking multiple build numbers per day (00-99)
-        base_date = datetime.now()
-        
-        for day_offset in range(max_days_back):
-            check_date = base_date - timedelta(days=day_offset)
-            date_str = check_date.strftime("%Y%m%d")
-            
-            # Try build numbers from 99 down to 00 (newer builds typically have higher numbers)
-            for build_num in range(99, -1, -1):
-                version = f"{date_str}{build_num:02d}"
-                download_url = f"https://releases.grapheneos.org/{codename}-factory-{version}.zip"
-                
-                try:
-                    response = await client.head(download_url, follow_redirects=True)
-                    if response.status_code == 200:
-                        return version
-                except Exception:
-                    continue
-        
-        return None
+    """
+    Find the latest GrapheneOS version via a single request to the releases atom feed.
+    GrapheneOS uses the same version for all devices; the feed lists the latest first.
+    """
+    global _LATEST_VERSION_CACHE, _LATEST_VERSION_CACHE_TIME
+    now = datetime.now()
+    if _LATEST_VERSION_CACHE is not None and _LATEST_VERSION_CACHE_TIME is not None:
+        if now - _LATEST_VERSION_CACHE_TIME < _LATEST_VERSION_CACHE_TTL:
+            return _LATEST_VERSION_CACHE
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get("https://grapheneos.org/releases.atom")
+            if response.status_code != 200:
+                return None
+            # First <entry><title> is the latest version (e.g. 2026030700)
+            match = re.search(r"<entry>.*?<title>(\d{10})</title>", response.text, re.DOTALL)
+            if match:
+                version = match.group(1)
+                _LATEST_VERSION_CACHE = version
+                _LATEST_VERSION_CACHE_TIME = now
+                return version
+    except Exception:
+        pass
+    return None
 
 
 async def get_available_releases(codename: str) -> List[Dict[str, Any]]:
     """Get available GrapheneOS releases for a codename"""
     # GrapheneOS doesn't provide a public releases.json API
-    # The factory image URL pattern is: https://releases.grapheneos.org/{codename}-factory-{version}.zip
+    # Install zip URL: https://releases.grapheneos.org/{codename}-install-{version}.zip
     # Version format is typically: YYYYMMDDXX (e.g., 2024122200)
     # Since we can't fetch a list, we return an empty list and the UI allows manual entry
     # In the future, we could scrape their website or maintain a known versions list
@@ -236,15 +244,14 @@ async def download_release(
     version_dir = bundles_root / codename / version
     version_dir.mkdir(parents=True, exist_ok=True)
     
-    # Download URL pattern for GrapheneOS factory images
-    # Format: https://releases.grapheneos.org/{codename}-factory-{version}.zip
+    # Download URL: https://releases.grapheneos.org/{codename}-install-{version}.zip
     # Version format is typically: YYYYMMDDXX (e.g., 2024122200)
     
     # Validate codename and version format
     if not codename or not version:
         raise ValueError("Codename and version are required")
     
-    download_url = f"https://releases.grapheneos.org/{codename}-factory-{version}.zip"
+    download_url = f"https://releases.grapheneos.org/{codename}-install-{version}.zip"
     sha256_url = f"{download_url}.sha256"
     sig_url = f"{download_url}.sig"
     
@@ -254,16 +261,16 @@ async def download_release(
     
     errors = []
     
-    factory_zip_path = version_dir / f"{codename}-factory-{version}.zip"
+    factory_zip_path = version_dir / f"{codename}-install-{version}.zip"
     
     try:
-        # Download factory image ZIP
+        # Download install zip
         async with httpx.AsyncClient(timeout=3600.0) as client:
             # First, check if the file exists
             head_response = await client.head(download_url)
             if head_response.status_code == 404:
                 raise Exception(
-                    f"Release not found: {codename}-factory-{version}.zip (HTTP 404). "
+                    f"Release not found: {codename}-install-{version}.zip (HTTP 404). "
                     f"Please verify the codename and version are correct. "
                     f"Version format is typically YYYYMMDDXX (e.g., 2024122200)."
                 )
@@ -286,7 +293,7 @@ async def download_release(
                             progress = (downloaded / total_size * 100) if total_size > 0 else 0
                             await progress_callback(progress, downloaded, total_size)
         
-        # Extract the factory ZIP - GrapheneOS factory ZIPs contain:
+        # Extract the install zip - GrapheneOS install ZIPs contain:
         # - boot.img, system.img, vendor.img, etc.
         # - flash-all.sh (Unix)
         # - flash-all.bat (Windows)
@@ -295,7 +302,7 @@ async def download_release(
         with zipfile.ZipFile(factory_zip_path, 'r') as zip_ref:
             zip_ref.extractall(version_dir)
         
-        # Rename the factory ZIP to image.zip for compatibility with our bundle structure
+        # Rename the install zip to image.zip for compatibility with our bundle structure
         # The extracted files will be used for flashing, image.zip for verification
         factory_zip_path.rename(image_zip_path)
         

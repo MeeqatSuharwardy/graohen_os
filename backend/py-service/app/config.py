@@ -6,8 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 from typing import List
 
-# .env path: backend/py-service/.env (relative to this file)
-_ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
+# .env path: backend/py-service/.env (same dir as py-service)
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     
     # API
     API_V1_PREFIX: str = "/api/v1"
-    ALLOWED_HOSTS: str = "localhost,127.0.0.1,freedomos.vulcantech.co,vulcantech.tech"
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1,freedomos.vulcantech.co,fxmail.ai"
     
     # Database - loaded from .env (DATABASE_URL)
     DATABASE_URL: str = Field(default="", description="PostgreSQL URL")
@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str = ""
     REDIS_MAX_CONNECTIONS: int = 10
     
+    # Rate limits (per IP)
+    REGISTER_RATE_LIMIT_MAX: int = Field(
+        default=20,
+        description="Max register attempts per IP per hour",
+    )
+    REGISTER_RATE_LIMIT_WINDOW: int = Field(
+        default=3600,
+        description="Register rate limit window in seconds",
+    )
+
     # Security
     SECRET_KEY: str = Field(
         default="change-this-secret-key-in-production-use-long-random-string",
@@ -71,14 +81,14 @@ class Settings(BaseSettings):
         description="Comma-separated admin emails for CMS/admin APIs",
     )
 
-    # Email (for encrypted email service)
+    # Email (fxmail.ai - addresses like token@fxmail.ai, web viewer)
     EMAIL_DOMAIN: str = Field(
-        default="vulcantech.tech",
-        description="Email domain for generating email addresses (e.g., howie@vulcantech.tech)",
+        default="fxmail.ai",
+        description="Email domain for addresses (e.g. token@fxmail.ai)",
     )
     EXTERNAL_HTTPS_BASE_URL: str = Field(
-        default="https://vulcantech.tech",
-        description="Base URL for external email links",
+        default="https://fxmail.ai",
+        description="Base URL for email links and web viewer",
     )
     
     # SMTP Email Server
@@ -101,6 +111,10 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = Field(
         default=True,
         description="Use TLS for SMTP",
+    )
+    SMTP_FROM: str = Field(
+        default="noreply@fxmail.ai",
+        description="From address for outgoing notification emails",
     )
     
     # AWS (Optional - for file storage)
