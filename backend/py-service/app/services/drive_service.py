@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, Tuple, List
 from sqlalchemy import select, delete, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import AsyncSessionLocal
+from app.core import database
 from app.models.drive_file import DriveFile
 from app.core.encryption import encrypt_bytes, decrypt_bytes, generate_key
 from app.core.key_manager import derive_key_from_passcode, generate_salt_for_identifier
@@ -28,9 +28,9 @@ def _generate_file_id() -> str:
 
 async def get_file_metadata(file_id: str) -> Optional[Dict[str, Any]]:
     """Get file metadata from PostgreSQL."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         return None
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         result = await session.execute(select(DriveFile).where(DriveFile.file_id == file_id))
         f = result.scalar_one_or_none()
         if not f:
@@ -49,9 +49,9 @@ async def get_file_metadata(file_id: str) -> Optional[Dict[str, Any]]:
 
 async def get_file_from_db(file_id: str) -> Optional[Dict[str, Any]]:
     """Get file doc (encrypted content, key, etc.) from PostgreSQL."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         return None
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         result = await session.execute(select(DriveFile).where(DriveFile.file_id == file_id))
         f = result.scalar_one_or_none()
         if not f:
@@ -90,7 +90,7 @@ async def encrypt_and_store_file(
     never_expire: bool = False,
 ) -> Dict[str, Any]:
     """Encrypt and store file in PostgreSQL."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         raise DriveEncryptionError("Database not initialized")
     file_id = _generate_file_id()
     content_key = generate_key()
@@ -115,7 +115,7 @@ async def encrypt_and_store_file(
     expires_at = None
     if not never_expire and expires_in_hours:
         expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         df = DriveFile(
             file_id=file_id,
             filename=filename,
@@ -168,9 +168,9 @@ async def decrypt_file_with_passcode(file_id: str, passcode: str) -> bytes:
 
 async def delete_file(file_id: str) -> bool:
     """Delete file from PostgreSQL."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         return False
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         result = await session.execute(delete(DriveFile).where(DriveFile.file_id == file_id))
         await session.commit()
         return result.rowcount > 0
@@ -178,9 +178,9 @@ async def delete_file(file_id: str) -> bool:
 
 async def get_user_storage_used(owner_email: str) -> int:
     """Get total storage used by user in bytes."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         return 0
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         now = datetime.utcnow()
         result = await session.execute(
             select(func.coalesce(func.sum(DriveFile.size), 0)).where(
@@ -193,9 +193,9 @@ async def get_user_storage_used(owner_email: str) -> int:
 
 async def list_user_files(owner_email: str, limit: int = 50, offset: int = 0) -> Tuple[List[Dict], int]:
     """List files for user. Returns (files, total)."""
-    if AsyncSessionLocal is None:
+    if database.AsyncSessionLocal is None:
         return [], 0
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         now = datetime.utcnow()
         filt = (
             DriveFile.owner_email == owner_email.lower(),
