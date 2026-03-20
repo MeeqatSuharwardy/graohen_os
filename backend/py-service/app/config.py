@@ -10,6 +10,7 @@ from typing import List
 _ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
+
 class Settings(BaseSettings):
     """Unified application settings for FastAPI backend with GrapheneOS flashing support"""
     
