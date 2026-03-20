@@ -1,9 +1,18 @@
 """Unified FastAPI Application - Merges FastAPI backend with GrapheneOS flashing"""
 
+from pathlib import Path
+
+# Load .env before any config imports (ensures DATABASE_URL etc. available for gunicorn workers)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    from dotenv import load_dotenv
+    load_dotenv(_env_path)
+    
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
 import logging
 
 # Import unified config
