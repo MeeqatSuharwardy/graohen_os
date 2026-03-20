@@ -51,11 +51,11 @@ class Settings(BaseSettings):
     
     # Rate limits (per IP)
     REGISTER_RATE_LIMIT_MAX: int = Field(
-        default=50,
+        default=20,
         description="Max register attempts per IP per hour",
     )
     REGISTER_RATE_LIMIT_WINDOW: int = Field(
-        default=7600,
+        default=3600,
         description="Register rate limit window in seconds",
     )
 
@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = Field(
         default=True,
         description="Use TLS for SMTP",
+    )
+    SMTP_FROM: str = Field(
+        default="noreply@fxmail.ai",
+        description="From address for outgoing notification emails",
     )
     
     # AWS (Optional - for file storage)
