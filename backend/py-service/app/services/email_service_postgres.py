@@ -94,12 +94,22 @@ class EmailServicePostgres:
                 }
             elif user_email:
                 encryption_mode = "authenticated"
-                user_salt = generate_salt_for_identifier(user_email)
-                base_key = derive_key_from_passcode(user_email, user_salt)
-                user_key = derive_user_key_complex(
-                    base_key, user_salt + user_email.encode()
-                )
-                encrypted_content_key = encrypt_bytes(content_key, user_key)
+                # Encrypt content key for sender AND each fxmail.ai recipient (so both can read)
+                per_user_keys: Dict[str, Dict[str, str]] = {}
+                participants = [sender_email.lower().strip()]
+                for r in recipient_emails:
+                    r_lower = r.lower().strip()
+                    if r_lower.endswith(f"@{EMAIL_DOMAIN}") and r_lower not in participants:
+                        participants.append(r_lower)
+                for participant in participants:
+                    p_salt = generate_salt_for_identifier(participant)
+                    p_base = derive_key_from_passcode(participant, p_salt)
+                    p_key = derive_user_key_complex(
+                        p_base, p_salt + participant.encode()
+                    )
+                    per_user_keys[participant] = encrypt_bytes(content_key, p_key)
+                    p_key = b"\x00" * len(p_key)
+                encrypted_content_key = {"per_user": per_user_keys}
             else:
                 raise EmailEncryptionError(
                     "Either user_email or passcode must be provided"
@@ -244,7 +254,7 @@ class EmailServicePostgres:
         return_metadata: bool = False,
     ):
         """
-        Decrypt email for authenticated user (sender only - encrypted with sender's key).
+        Decrypt email for authenticated user (sender or fxmail.ai recipient).
 
         Returns:
             If return_metadata=True: (email_body_bytes, metadata_dict)
@@ -257,7 +267,9 @@ class EmailServicePostgres:
         if stored.encryption_mode != "authenticated":
             raise EmailEncryptionError("Email requires passcode unlock")
 
-        if stored.sender_email != user_email.lower():
+        user_lower = user_email.lower().strip()
+        recipients = [r.lower().strip() for r in (stored.recipient_emails or [])]
+        if stored.sender_email != user_lower and user_lower not in recipients:
             raise EmailEncryptionError("Access denied: email belongs to different user")
 
         encrypted_content = stored.encrypted_content
@@ -265,13 +277,26 @@ class EmailServicePostgres:
         if not encrypted_content or not encrypted_content_key:
             raise EmailEncryptionError("Encrypted email data not found")
 
+        # Resolve which encrypted key to use (per_user or legacy sender-only)
+        key_payload = None
+        if isinstance(encrypted_content_key, dict) and "per_user" in encrypted_content_key:
+            per_user = encrypted_content_key.get("per_user") or {}
+            key_payload = per_user.get(user_lower)
+        if not key_payload and (stored.sender_email == user_lower):
+            # Legacy format: flat {ciphertext, nonce, tag} for sender only
+            if "ciphertext" in (encrypted_content_key or {}):
+                key_payload = encrypted_content_key
+
+        if not key_payload:
+            raise EmailEncryptionError("Access denied: no decryption key for this user")
+
         try:
-            user_salt = generate_salt_for_identifier(user_email)
-            base_key = derive_key_from_passcode(user_email, user_salt)
+            user_salt = generate_salt_for_identifier(user_lower)
+            base_key = derive_key_from_passcode(user_lower, user_salt)
             user_key = derive_user_key_complex(
-                base_key, user_salt + user_email.encode()
+                base_key, user_salt + user_lower.encode()
             )
-            content_key = decrypt_bytes(encrypted_content_key, user_key)
+            content_key = decrypt_bytes(key_payload, user_key)
             email_body = decrypt_bytes(encrypted_content, content_key)
             content_key = b"\x00" * len(content_key)
             user_key = b"\x00" * len(user_key)
