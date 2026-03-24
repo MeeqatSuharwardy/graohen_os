@@ -100,15 +100,16 @@ def main():
         print(f"5. Drive storage: FAIL - {e}")
         fail += 1
 
-    # 6. Email send
+    # 6. Email send (authenticated mode - no passcode)
+    email_id = None
     try:
         d = req("POST", f"{API}/email/send", {
             "to": [TEST_EMAIL],
             "subject": "Test",
             "body": "Hello",
-            "encryption_mode": "authenticated",
         }, token=token)
-        print(f"6. Email send: OK")
+        email_id = d.get("email_id")
+        print(f"6. Email send: OK - email_id={email_id[:12] if email_id else '?'}...")
         ok += 1
     except HTTPError as e:
         print(f"6. Email send: FAIL - {e.code} {e.reason}")
@@ -116,6 +117,70 @@ def main():
     except Exception as e:
         print(f"6. Email send: FAIL - {e}")
         fail += 1
+
+    # 6b. View email (decrypt for authenticated user)
+    if email_id:
+        try:
+            r = Request(f"{API}/email/{email_id}", headers={"Authorization": f"Bearer {token}"})
+            with urlopen(r, timeout=5) as resp:
+                view_d = json.loads(resp.read().decode())
+            body = view_d.get("body", "")
+            print(f"6b. View email: OK - body={body[:30]}...")
+            ok += 1
+        except HTTPError as e:
+            print(f"6b. View email: FAIL - {e.code} {e.reason}")
+            fail += 1
+        except Exception as e:
+            print(f"6b. View email: FAIL - {e}")
+            fail += 1
+
+        # 6c. Reply to email
+        try:
+            reply_d = req("POST", f"{API}/email/{email_id}/reply", {
+                "body": "Reply body",
+            }, token=token)
+            print(f"6c. Reply: OK - reply_id={reply_d.get('email_id', '?')[:12]}...")
+            ok += 1
+        except HTTPError as e:
+            print(f"6c. Reply: FAIL - {e.code} {e.reason}")
+            fail += 1
+        except Exception as e:
+            print(f"6c. Reply: FAIL - {e}")
+            fail += 1
+
+    # 6d. Send passcode-protected email + unlock
+    passcode_email_id = None
+    try:
+        passcode_d = req("POST", f"{API}/email/send", {
+            "to": [TEST_EMAIL],
+            "subject": "Passcode test",
+            "body": "Secret content",
+            "passcode": "test1234",
+        }, token=token)
+        passcode_email_id = passcode_d.get("email_id")
+        print(f"6d. Send passcode email: OK")
+        ok += 1
+    except HTTPError as e:
+        print(f"6d. Send passcode email: FAIL - {e.code} {e.reason}")
+        fail += 1
+    except Exception as e:
+        print(f"6d. Send passcode email: FAIL - {e}")
+        fail += 1
+
+    if passcode_email_id:
+        try:
+            unlock_d = req("POST", f"{API}/email/{passcode_email_id}/unlock", {
+                "passcode": "test1234",
+            })
+            body = unlock_d.get("body", "")
+            print(f"6e. Unlock passcode email: OK - body={body[:30]}...")
+            ok += 1
+        except HTTPError as e:
+            print(f"6e. Unlock passcode email: FAIL - {e.code} {e.reason}")
+            fail += 1
+        except Exception as e:
+            print(f"6e. Unlock passcode email: FAIL - {e}")
+            fail += 1
 
     # 7. Login challenge
     try:

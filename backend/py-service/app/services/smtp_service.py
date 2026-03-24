@@ -1,5 +1,7 @@
 """SMTP service for sending notification emails (link-only, link+passcode)."""
 
+from typing import Optional
+
 import logging
 from email.mime.text import MIMEText
 from email.utils import formataddr
@@ -8,7 +10,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_smtp_available: bool | None = None
+_smtp_available: Optional[bool] = None
 
 
 def _smtp_configured() -> bool:

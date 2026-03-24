@@ -1,5 +1,7 @@
 """Email ingestion - receive emails from Postfix/SMTP (Gmail, Yahoo, etc.)."""
 
+from typing import Optional, Tuple
+
 import email.utils
 import logging
 from email import policy
@@ -17,7 +19,7 @@ class EmailIngestionError(Exception):
     pass
 
 
-def _extract_token_from_recipient(recipient: str) -> str | None:
+def _extract_token_from_recipient(recipient: str) -> Optional[str]:
     """
     Extract token from recipient like 'token@fxmail.ai' or 'token+tag@fxmail.ai'.
     Returns the local part (token) if domain matches, else None.
@@ -33,7 +35,7 @@ def _extract_token_from_recipient(recipient: str) -> str | None:
     return local if len(local) >= 8 else None  # Basic sanity
 
 
-def _parse_incoming_email(email_bytes: bytes) -> tuple[str, str, str, bytes]:
+def _parse_incoming_email(email_bytes: bytes) -> Tuple[str, str, str, bytes]:
     """
     Parse raw email bytes. Returns (sender, subject, recipient_token, body_bytes).
     """
@@ -76,7 +78,7 @@ def _parse_incoming_email(email_bytes: bytes) -> tuple[str, str, str, bytes]:
     return sender, subject, recipient_token, full_body.encode("utf-8")
 
 
-def get_email_ingestion_service() -> "EmailIngestionService | None":
+def get_email_ingestion_service() -> Optional["EmailIngestionService"]:
     """Return ingestion service if available."""
     try:
         return EmailIngestionService()
@@ -91,7 +93,7 @@ class EmailIngestionService:
         self,
         *,
         email_bytes: bytes,
-        recipient_address: str | None = None,
+        recipient_address: Optional[str] = None,
     ) -> dict:
         """
         Ingest incoming email. recipient_address can override (from Postfix X-Recipient/To).

@@ -96,8 +96,8 @@ async def init_db() -> None:
             autoflush=False,
         )
         
-        # Create tables (users, drive_files, emails)
-        from app.models import User, DriveFile, StoredEmail
+        # Create tables (users, drive_files, emails, user_ssh_keys)
+        from app.models import User, DriveFile, StoredEmail, UserSSHKey
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         

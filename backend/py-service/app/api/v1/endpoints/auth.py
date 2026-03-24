@@ -59,7 +59,12 @@ class UserRegister(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
     full_name: Optional[str] = Field(None, max_length=255)
     device_id: Optional[str] = Field(None, max_length=255, description="Device identifier for device binding")
-    
+    ssh_public_key: Optional[str] = Field(
+        None,
+        max_length=4096,
+        description="SSH public key for browser login (OpenSSH format, e.g. ssh-ed25519 AAAA...)"
+    )
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
@@ -156,6 +161,29 @@ class DeviceEncryptionKeyResponse(BaseModel):
     device_id: str
     registered: bool
     message: str
+
+
+# SSH key models (browser-only login, device_id flow kept for mobile)
+class SSHKeyAddRequest(BaseModel):
+    """Add SSH public key to account (requires auth)"""
+    ssh_public_key: str = Field(..., min_length=100, max_length=4096)
+
+
+class SSHChallengeRequest(BaseModel):
+    """Request SSH login challenge"""
+    email: EmailStr
+
+
+class SSHChallengeResponse(BaseModel):
+    """SSH challenge response"""
+    challenge: str
+    expires_in_seconds: int = 120
+
+
+class SSHLoginRequest(BaseModel):
+    """SSH key login - sign challenge with private key"""
+    email: EmailStr
+    signature: str = Field(..., min_length=1, description="Base64-encoded signature of challenge")
 
 
 async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
@@ -424,6 +452,16 @@ async def register(
         device_seed = await create_device_seed_for_user(user["id"], device_id)
         device_key_blob = encrypt_seed_for_device_download(device_seed, user_data.password)
         device_seed = b"\x00" * len(device_seed)
+
+        # Optional: store SSH public key for browser-only login (no device_id needed)
+        if user_data.ssh_public_key:
+            try:
+                from app.services.ssh_key_service import store_ssh_key
+                await store_ssh_key(int(user["id"]), user_data.ssh_public_key)
+            except ValueError as e:
+                logger.warning(f"SSH key not stored at registration: {e}")
+            except Exception as e:
+                logger.warning(f"SSH key storage failed (non-fatal): {e}")
         
         await security.log_security_event(
             SecurityEvent.LOGIN_SUCCESS,
@@ -476,6 +514,137 @@ async def download_device_key(
     blob = encrypt_seed_for_device_download(seed, data.password)
     seed = b"\x00" * len(seed)
     return {"device_key_download": blob, "device_id": data.device_id}
+
+
+# --- SSH key endpoints (browser-only login, no device_id) ---
+
+@router.post("/ssh-key/add")
+async def add_ssh_key(
+    data: SSHKeyAddRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Add SSH public key for browser login. Requires Bearer token.
+    Key is stored encrypted; only server can decrypt for verification.
+    """
+    try:
+        from app.services.ssh_key_service import store_ssh_key
+        fingerprint = await store_ssh_key(int(current_user["id"]), data.ssh_public_key)
+        return {"fingerprint": fingerprint, "message": "SSH key added successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"SSH key add failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to add SSH key")
+
+
+@router.post("/login/ssh/challenge", response_model=SSHChallengeResponse)
+async def ssh_login_challenge(data: SSHChallengeRequest):
+    """
+    Get challenge for SSH key login (browser only).
+    User must have registered an SSH public key. Challenge expires in 2 min.
+    """
+    from app.services.ssh_key_service import get_ssh_key_by_email, store_ssh_challenge
+
+    key_info = await get_ssh_key_by_email(data.email)
+    if not key_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No SSH key registered for this email. Add one via settings or register with ssh_public_key.",
+        )
+    challenge = secrets.token_urlsafe(32)
+    await store_ssh_challenge(data.email, challenge)
+    return SSHChallengeResponse(challenge=challenge, expires_in_seconds=120)
+
+
+@router.post("/login/ssh", response_model=TokenResponse)
+async def ssh_login(
+    data: SSHLoginRequest,
+    request: Request,
+):
+    """
+    Login with SSH key (browser only). No device_id required.
+    Requires prior POST /auth/login/ssh/challenge. Sign challenge with private key, send signature.
+    """
+    from app.services.ssh_key_service import (
+        get_ssh_key_by_email,
+        get_and_consume_ssh_challenge,
+        verify_ssh_signature,
+    )
+
+    key_info = await get_ssh_key_by_email(data.email)
+    if not key_info:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No SSH key registered for this email",
+        )
+    user_id, _, _ = key_info
+
+    challenge = await get_and_consume_ssh_challenge(data.email)
+    if not challenge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired challenge. Request new challenge.",
+        )
+
+    if not await verify_ssh_signature(user_id, challenge, data.signature):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Signature verification failed",
+        )
+
+    user = await get_user_by_email(data.email)
+    if not user or not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Account disabled")
+
+    device_id = f"ssh-browser-{generate_token_jti()}"
+    access_jti = generate_token_jti()
+    refresh_jti = generate_token_jti()
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
+    access_token = create_access_token(
+        data={
+            "sub": user["id"],
+            "email": user["email"],
+            "jti": access_jti,
+            "device_id": device_id,
+        },
+        expires_delta=access_token_expires,
+    )
+    refresh_token = create_refresh_token(
+        data={
+            "sub": user["id"],
+            "email": user["email"],
+            "jti": refresh_jti,
+            "device_id": device_id,
+        },
+    )
+    await store_refresh_token(
+        refresh_token=refresh_token,
+        user_id=user["id"],
+        device_id=device_id,
+        expires_in=refresh_token_expires,
+    )
+
+    security = get_security_service()
+    client_ip = request.client.host if request.client else "unknown"
+    await security.log_security_event(
+        SecurityEvent.LOGIN_SUCCESS,
+        identifier=data.email,
+        user_id=user["id"],
+        ip_address=client_ip,
+        action="ssh_login",
+        metadata={"device_id": device_id},
+        success=True,
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=int(access_token_expires.total_seconds()),
+        device_id=device_id,
+    )
 
 
 @router.post("/login/challenge", response_model=LoginChallengeResponse)

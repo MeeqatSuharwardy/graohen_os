@@ -21,7 +21,7 @@ from app.services.email_ingestion import (
     get_email_ingestion_service,
     EmailIngestionError,
 )
-from app.services.smtp_service import send_secure_message_notification
+from app.services.smtp_service import send_secure_message_notification, send_notification_email
 from app.middleware.email_security import (
     check_email_rate_limit,
     validate_email_token,
@@ -284,6 +284,53 @@ def generate_secure_link(email_id: str, base_url: Optional[str] = None) -> str:
     secure_link = f"{base_url}/email/{email_id}"
     
     return secure_link
+
+
+class TestSmtpRequest(BaseModel):
+    """Test SMTP send request (internal, no auth)"""
+    from_email: str = Field(..., description="Sender email (display)")
+    to: List[EmailStr] = Field(..., min_length=1, max_length=20, description="Recipients")
+    subject: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(..., min_length=1, max_length=10000)
+
+
+class TestSmtpResponse(BaseModel):
+    """Test SMTP response"""
+    sender: str
+    notifications_sent: List[Dict[str, Any]]
+
+
+@router.post("/test-smtp", response_model=TestSmtpResponse)
+async def test_smtp_send(
+    data: TestSmtpRequest,
+    x_smtp_test_secret: Optional[str] = Header(None, alias="X-SMTP-Test-Secret"),
+):
+    """
+    Send test emails via SMTP (internal testing, no auth).
+    Requires SMTP_TEST_SECRET in .env and X-SMTP-Test-Secret header.
+    Logs per-recipient SENT/FAILED status.
+    """
+    secret = getattr(settings, "SMTP_TEST_SECRET", "") or ""
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SMTP test not configured (SMTP_TEST_SECRET)",
+        )
+    if x_smtp_test_secret != secret:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid test secret")
+
+    results = []
+    for to_email in data.to:
+        sent = await send_notification_email(
+            to_email=to_email,
+            subject=data.subject,
+            body=data.body,
+            from_name=data.from_email,
+        )
+        results.append({"to": to_email, "sent": sent})
+        logger.info(f"Test SMTP: {to_email} -> {'SENT' if sent else 'FAILED'}")
+
+    return TestSmtpResponse(sender=data.from_email, notifications_sent=results)
 
 
 @router.post("/send", response_model=EmailSendResponse, status_code=status.HTTP_201_CREATED)

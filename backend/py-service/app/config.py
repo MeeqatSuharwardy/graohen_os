@@ -116,6 +116,10 @@ class Settings(BaseSettings):
         default="noreply@fxmail.ai",
         description="From address for outgoing notification emails",
     )
+    SMTP_TEST_SECRET: str = Field(
+        default="",
+        description="Optional secret for POST /email/test-smtp (internal testing, no auth required)",
+    )
     
     # AWS (Optional - for file storage)
     AWS_ACCESS_KEY_ID: str = ""
