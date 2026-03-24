@@ -518,26 +518,6 @@ async def download_device_key(
 
 # --- SSH key endpoints (browser-only login, no device_id) ---
 
-@router.post("/ssh-key/add")
-async def add_ssh_key(
-    data: SSHKeyAddRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """
-    Add SSH public key for browser login. Requires Bearer token.
-    Key is stored encrypted; only server can decrypt for verification.
-    """
-    try:
-        from app.services.ssh_key_service import store_ssh_key
-        fingerprint = await store_ssh_key(int(current_user["id"]), data.ssh_public_key)
-        return {"fingerprint": fingerprint, "message": "SSH key added successfully"}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.error(f"SSH key add failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to add SSH key")
-
-
 @router.post("/login/ssh/challenge", response_model=SSHChallengeResponse)
 async def ssh_login_challenge(data: SSHChallengeRequest):
     """
@@ -1175,6 +1155,26 @@ async def get_current_user(
             detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+@router.post("/ssh-key/add")
+async def add_ssh_key(
+    data: SSHKeyAddRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Add SSH public key for browser login. Requires Bearer token.
+    Key is stored encrypted; only server can decrypt for verification.
+    """
+    try:
+        from app.services.ssh_key_service import store_ssh_key
+        fingerprint = await store_ssh_key(int(current_user["id"]), data.ssh_public_key)
+        return {"fingerprint": fingerprint, "message": "SSH key added successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"SSH key add failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to add SSH key")
 
 
 @router.post("/device/register-key", response_model=DeviceEncryptionKeyResponse)
