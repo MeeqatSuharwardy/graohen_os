@@ -418,6 +418,21 @@ async def check_storage_available(user_email: str, file_size: int) -> bool:
     return await check_storage_quota(user_email, file_size)
 
 
+def _quota_exceeded_detail(
+    user_email: str,
+    file_size: int,
+    used: int,
+    quota: int,
+) -> str:
+    available = max(0, quota - used)
+    return (
+        f"File size ({file_size} bytes) exceeds available quota. "
+        f"Maximum upload size is your remaining space: {available} bytes "
+        f"({available / (1024 ** 3):.4f} GB). "
+        f"Currently used {used} / {quota} bytes."
+    )
+
+
 async def add_user_file(user_email: str, file_id: str) -> None:
     """No-op: files are in PostgreSQL"""
     pass
@@ -459,34 +474,28 @@ async def upload_file(
     
     File is encrypted with a random content key, which is then encrypted
     with either user key (authenticated) or passcode-derived key (if passcode provided).
+    
+    Per-file size limit = remaining quota (no separate cap). A user with 5 GB free
+    may upload up to a 5 GB file in one request (subject to reverse-proxy body limits).
     """
     try:
         # Read file content
         file_content = await file.read()
         file_size = len(file_content)
-        
-        # Validate file size (e.g., max 100MB)
-        MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"File size exceeds maximum of {MAX_FILE_SIZE / (1024*1024)}MB"
-            )
-        
+
         if file_size == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File is empty"
+                detail="File is empty",
             )
-        
-        # Check storage quota (5GB per user)
+
         user_email = current_user.get("email")
         if not await check_storage_available(user_email, file_size):
             used = await get_user_storage_used(user_email)
             quota = await get_user_storage_quota(user_email)
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Storage quota exceeded. Used: {used / (1024*1024):.1f}MB, Quota: {quota / (1024*1024*1024):.1f}GB"
+                detail=_quota_exceeded_detail(user_email, file_size, used, quota),
             )
         
         # Use MongoDB drive service with strong encryption
@@ -953,7 +962,13 @@ async def upload_encrypted_file(
     try:
         user_email = current_user.get("email")
         file_size = file_data.size
-        
+
+        if file_size <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size must be greater than zero",
+            )
+
         # Validate encrypted content structure
         required_fields = ["ciphertext", "nonce", "tag"]
         for field in required_fields:
@@ -968,14 +983,14 @@ async def upload_encrypted_file(
                     detail=f"Missing required field in encrypted_content_key: {field}"
                 )
         
-        # Check storage quota (5GB per user)
         if not await check_storage_quota(user_email, file_size):
             current_used = await get_user_storage_used(user_email)
             quota = await get_user_storage_quota(user_email)
-            available = quota - current_used
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Storage quota exceeded. Used: {current_used / (1024**3):.2f}GB / {quota / (1024**3):.2f}GB. Available: {available / (1024**3):.2f}GB"
+                detail=_quota_exceeded_detail(
+                    user_email, file_size, current_used, quota
+                ),
             )
         
         # Generate file ID
