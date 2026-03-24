@@ -22,7 +22,7 @@ from app.config import settings
 from app.core import database
 from app.core.encryption import encrypt_bytes, decrypt_bytes, EncryptionError
 from app.models.user_ssh_key import UserSSHKey
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 import logging
 
@@ -144,6 +144,63 @@ async def store_ssh_key(user_id: int, public_key_pem: str) -> str:
         raise
 
 
+async def user_has_registered_ssh_key(user_id: int) -> bool:
+    """True if this user has at least one SSH public key (browser SSH login)."""
+    if database.AsyncSessionLocal is None:
+        return False
+    async with database.AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(UserSSHKey.id).where(UserSSHKey.user_id == user_id).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+
+async def count_ssh_keys_for_user(user_id: int) -> int:
+    """Number of registered SSH public keys for user."""
+    if database.AsyncSessionLocal is None:
+        return 0
+    async with database.AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(UserSSHKey)
+            .where(UserSSHKey.user_id == user_id)
+        )
+        return int(result.scalar_one() or 0)
+
+
+def _verify_signature_with_public_bytes(
+    public_key_pem: bytes,
+    challenge: str,
+    signature_b64: str,
+) -> bool:
+    try:
+        key = serialization.load_ssh_public_key(public_key_pem)
+        challenge_bytes = challenge.encode("utf-8")
+        signature = base64.b64decode(signature_b64)
+    except Exception as e:
+        logger.warning(f"Invalid SSH signature payload: {e}")
+        return False
+    try:
+        if isinstance(key, Ed25519PublicKey):
+            key.verify(signature, challenge_bytes)
+            return True
+        if isinstance(key, rsa.RSAPublicKey):
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.asymmetric import padding
+            key.verify(signature, challenge_bytes, padding.PKCS1v15(), hashes.SHA256())
+            return True
+        if isinstance(key, ec.EllipticCurvePublicKey):
+            from cryptography.hazmat.primitives import hashes
+            key.verify(signature, challenge_bytes, ec.ECDSA(hashes.SHA256()))
+            return True
+    except InvalidSignature:
+        return False
+    except Exception as e:
+        logger.warning(f"SSH verification error: {e}")
+        return False
+    return False
+
+
 async def get_ssh_key_by_email(email: str) -> Optional[Tuple[int, Dict[str, str], str]]:
     """
     Get encrypted SSH key for user by email. Returns (user_id, encrypted_payload, key_type) or None.
@@ -174,57 +231,48 @@ async def verify_ssh_signature(
     user_id: int,
     challenge: str,
     signature_b64: str,
+    key_fingerprint: Optional[str] = None,
 ) -> bool:
     """
-    Decrypt user's stored public key and verify signature over challenge.
-    challenge: raw challenge string (from Redis)
-    signature_b64: base64-encoded signature from frontend
+    Verify challenge signature against user's registered SSH public key(s).
+
+    Proves possession of the matching private key; the private key is never sent.
+
+    If key_fingerprint (64-char hex) is set, only that key is tried (must belong to user).
+    If multiple keys exist and fingerprint is omitted, each key is tried until one verifies.
     """
     if database.AsyncSessionLocal is None:
         return False
 
     async with database.AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(UserSSHKey).where(UserSSHKey.user_id == user_id).limit(1)
-        )
-        row = result.scalar_one_or_none()
-        if not row:
+        if key_fingerprint:
+            result = await session.execute(
+                select(UserSSHKey).where(
+                    UserSSHKey.user_id == user_id,
+                    UserSSHKey.key_fingerprint == key_fingerprint.lower(),
+                )
+            )
+            rows = list(result.scalars().all())
+        else:
+            result = await session.execute(
+                select(UserSSHKey).where(UserSSHKey.user_id == user_id)
+            )
+            rows = list(result.scalars().all())
+
+        if not rows:
             return False
 
-        try:
-            payload = json.loads(row.encrypted_public_key)
-            public_key_pem = decrypt_ssh_public_key(payload)
-            key = serialization.load_ssh_public_key(public_key_pem)
-        except Exception as e:
-            logger.warning(f"Failed to load SSH key for verification: {e}")
-            return False
-
-        try:
-            challenge_bytes = challenge.encode("utf-8")
-            signature = base64.b64decode(signature_b64)
-        except Exception as e:
-            logger.warning(f"Invalid challenge/signature encoding: {e}")
-            return False
-
-        try:
-            if isinstance(key, Ed25519PublicKey):
-                key.verify(signature, challenge_bytes)
+        for row in rows:
+            try:
+                payload = json.loads(row.encrypted_public_key)
+                public_key_pem = decrypt_ssh_public_key(payload)
+            except Exception as e:
+                logger.warning(f"Failed to decrypt SSH public key for verify: {e}")
+                continue
+            if _verify_signature_with_public_bytes(
+                public_key_pem, challenge, signature_b64
+            ):
                 return True
-            if isinstance(key, rsa.RSAPublicKey):
-                from cryptography.hazmat.primitives import hashes
-                from cryptography.hazmat.primitives.asymmetric import padding
-                key.verify(signature, challenge_bytes, padding.PKCS1v15(), hashes.SHA256())
-                return True
-            if isinstance(key, ec.EllipticCurvePublicKey):
-                from cryptography.hazmat.primitives import hashes
-                key.verify(signature, challenge_bytes, ec.ECDSA(hashes.SHA256()))
-                return True
-        except InvalidSignature:
-            logger.warning("SSH signature verification failed")
-            return False
-        except Exception as e:
-            logger.warning(f"SSH verification error: {e}")
-            return False
 
     return False
 

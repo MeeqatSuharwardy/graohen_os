@@ -4,7 +4,7 @@ import secrets
 import hashlib
 import json
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -178,12 +178,86 @@ class SSHChallengeResponse(BaseModel):
     """SSH challenge response"""
     challenge: str
     expires_in_seconds: int = 120
+    requires_ssh_private_key: bool = True
+    instruction: str = Field(
+        default=(
+            "Sign the challenge string (UTF-8) with your SSH private key that matches the "
+            "registered public key. Send the base64 signature to POST /auth/login/ssh. "
+            "Without the private key file (or equivalent secure storage), login is impossible. "
+            "Never upload the private key to this API."
+        ),
+    )
+    registered_ssh_keys_count: int = Field(
+        0,
+        description="Number of SSH public keys on file; if >1, send key_fingerprint on login",
+    )
 
 
 class SSHLoginRequest(BaseModel):
-    """SSH key login - sign challenge with private key"""
+    """SSH login: only a valid signature proves possession of the private key; password is not used."""
     email: EmailStr
-    signature: str = Field(..., min_length=1, description="Base64-encoded signature of challenge")
+    signature: str = Field(
+        ...,
+        min_length=4,
+        description="Base64-encoded signature of the challenge (from your private key)",
+    )
+    key_fingerprint: Optional[str] = Field(
+        default=None,
+        description="SHA-256 hex (64 chars) of the public key; recommended when multiple SSH keys are registered",
+    )
+
+    @field_validator("key_fingerprint")
+    @classmethod
+    def normalize_optional_fingerprint(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        v = v.strip().lower()
+        if len(v) != 64 or any(c not in "0123456789abcdef" for c in v):
+            raise ValueError("key_fingerprint must be 64 hexadecimal characters")
+        return v
+
+    @field_validator("signature")
+    @classmethod
+    def signature_not_empty(cls, v: str) -> str:
+        s = (v or "").strip()
+        if not s:
+            raise ValueError(
+                "signature is required: sign the challenge with your SSH private key. "
+                "The private key is never sent to the server."
+            )
+        return s
+
+
+class RegisteredDeviceItem(BaseModel):
+    """One logical client / device_id seen for this account"""
+    device_id: str
+    device_kind: str = Field(
+        ...,
+        description="browser_ssh = web via SSH sign-in; native_app = mobile/desktop device-bound",
+    )
+    platform_hint: str
+    has_device_seed: bool
+    has_active_refresh_session: bool
+    encryption_key_fingerprint_preview: Optional[str] = None
+    key_algorithm: Optional[str] = None
+    fingerprint_registered_at: Optional[str] = None
+    is_current_session: bool = False
+
+
+class SSHKeyBrowserItem(BaseModel):
+    """Stored SSH public key used for browser login"""
+    key_fingerprint: str
+    key_type: str
+    registered_at: Optional[str] = None
+    purpose: str
+    description: str
+
+
+class RegisteredDevicesResponse(BaseModel):
+    """All registered clients: native/browser sessions + SSH keys for web"""
+    devices: List[RegisteredDeviceItem]
+    ssh_keys_for_browser_login: List[SSHKeyBrowserItem]
+    note: str
 
 
 async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
@@ -524,7 +598,11 @@ async def ssh_login_challenge(data: SSHChallengeRequest):
     Get challenge for SSH key login (browser only).
     User must have registered an SSH public key. Challenge expires in 2 min.
     """
-    from app.services.ssh_key_service import get_ssh_key_by_email, store_ssh_challenge
+    from app.services.ssh_key_service import (
+        get_ssh_key_by_email,
+        store_ssh_challenge,
+        count_ssh_keys_for_user,
+    )
 
     key_info = await get_ssh_key_by_email(data.email)
     if not key_info:
@@ -532,9 +610,15 @@ async def ssh_login_challenge(data: SSHChallengeRequest):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No SSH key registered for this email. Add one via settings or register with ssh_public_key.",
         )
+    user_id, _, _ = key_info
+    n = await count_ssh_keys_for_user(user_id)
     challenge = secrets.token_urlsafe(32)
     await store_ssh_challenge(data.email, challenge)
-    return SSHChallengeResponse(challenge=challenge, expires_in_seconds=120)
+    return SSHChallengeResponse(
+        challenge=challenge,
+        expires_in_seconds=120,
+        registered_ssh_keys_count=n,
+    )
 
 
 @router.post("/login/ssh", response_model=TokenResponse)
@@ -560,6 +644,19 @@ async def ssh_login(
         )
     user_id, _, _ = key_info
 
+    from app.services.ssh_key_service import count_ssh_keys_for_user
+
+    n_keys = await count_ssh_keys_for_user(user_id)
+    if n_keys > 1 and not data.key_fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Multiple SSH public keys are registered for this account. "
+                "Include key_fingerprint (64-character SHA-256 hex of the public key you used) "
+                "in the login request."
+            ),
+        )
+
     challenge = await get_and_consume_ssh_challenge(data.email)
     if not challenge:
         raise HTTPException(
@@ -567,10 +664,17 @@ async def ssh_login(
             detail="Invalid or expired challenge. Request new challenge.",
         )
 
-    if not await verify_ssh_signature(user_id, challenge, data.signature):
+    if not await verify_ssh_signature(
+        user_id, challenge, data.signature, key_fingerprint=data.key_fingerprint
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Signature verification failed",
+            detail=(
+                "SSH login failed: signature does not match any registered public key. "
+                "You must sign the challenge with the private key that pairs with your "
+                "registered public key. The private key file is never sent to this API—"
+                "only the signature is."
+            ),
         )
 
     user = await get_user_by_email(data.email)
@@ -756,6 +860,21 @@ async def _do_login(
                 detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        if settings.BLOCK_NON_SSH_LOGIN_IF_SSH_KEY_REGISTERED:
+            from app.services.ssh_key_service import user_has_registered_ssh_key
+            if await user_has_registered_ssh_key(int(user["id"])):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "This account has an SSH public key registered. Password and device-bound "
+                        "login are disabled by server policy. Use POST /auth/login/ssh/challenge "
+                        "then POST /auth/login/ssh with a signature from your matching SSH private key. "
+                        "Without that private key, login is not possible. Set "
+                        "BLOCK_NON_SSH_LOGIN_IF_SSH_KEY_REGISTERED=false on the server to allow "
+                        "device-bound login again."
+                    ),
+                )
         
         # Device proof required if user has device seed (from register or download)
         has_device_seed = await user_has_any_device_seed(user["id"])
@@ -1155,6 +1274,43 @@ async def get_current_user(
             detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+@router.get("/devices", response_model=RegisteredDevicesResponse)
+async def list_registered_devices(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """
+    List registered clients for this account (mobile, desktop, browser SSH sessions).
+
+    Sources: device seeds and refresh mappings in Redis, optional encryption-key
+    fingerprints, and SSH public keys stored for web sign-in.
+
+    `device_kind` is `browser_ssh` when `device_id` starts with `ssh-browser-` (SSH login);
+    otherwise `native_app` (typical mobile / desktop device-bound client).
+
+    `is_current_session` is true when `device_id` matches the current access token.
+    """
+    try:
+        payload = decode_token(credentials.credentials)
+        current_device_id = payload.get("device_id")
+    except Exception:
+        current_device_id = None
+
+    from app.services.user_devices_service import list_registered_devices_for_user
+
+    raw = await list_registered_devices_for_user(
+        str(current_user["id"]),
+        current_device_id=current_device_id,
+    )
+    return RegisteredDevicesResponse(
+        devices=[RegisteredDeviceItem(**d) for d in raw["devices"]],
+        ssh_keys_for_browser_login=[
+            SSHKeyBrowserItem(**k) for k in raw["ssh_keys_for_browser_login"]
+        ],
+        note=raw["note"],
+    )
 
 
 @router.post("/ssh-key/add")

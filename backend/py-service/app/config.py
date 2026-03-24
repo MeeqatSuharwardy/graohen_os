@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # If True, users who have registered an SSH public key cannot use POST /auth/login or
+    # /auth/login/secure — they must use POST /auth/login/ssh/challenge + /auth/login/ssh
+    # (signature from private key only; private key never sent). Default False so mobile
+    # device-bound login still works for accounts that also added an SSH key.
+    BLOCK_NON_SSH_LOGIN_IF_SSH_KEY_REGISTERED: bool = Field(
+        default=False,
+        description="Force SSH signature-only login when user has any SSH key registered",
+    )
     
     # CORS - Allow all origins (frontend can run on IP or any domain)
     CORS_ORIGINS: str = "*"
