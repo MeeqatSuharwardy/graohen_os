@@ -165,8 +165,8 @@ class DeviceEncryptionKeyResponse(BaseModel):
 
 # SSH key models (browser-only login, device_id flow kept for mobile)
 class SSHKeyAddRequest(BaseModel):
-    """Add SSH public key to account (requires auth)"""
-    ssh_public_key: str = Field(..., min_length=100, max_length=4096)
+    """Add SSH public key to account (requires auth). Ed25519 lines are ~70–100 chars."""
+    ssh_public_key: str = Field(..., min_length=20, max_length=4096)
 
 
 class SSHChallengeRequest(BaseModel):
